@@ -797,11 +797,16 @@ function taRead(ctx, f) {
   return out;
 }
 
-// RecordAbilityBattle (src/battle_ai_script_commands.c:643) for the PLAYER --
-// BATTLE_HISTORY->abilities[0], the only history this engine's one AI reads.
-// The call sites follow source's, event by event (survey: phase-d-log F2).
+// RecordAbilityBattle (src/battle_ai_script_commands.c:643) --
+// BATTLE_HISTORY->abilities[battler]. PALACE FORK: both battlers' AIs run, so
+// both records are kept (the Arena engine kept only the player's, the one its
+// single AI read). RecordAbilityBattle has no side check; the call sites follow
+// source's, event by event (survey: arena-solver phase-d-log F2).
 function recordAbility(s, side, ability) {
-  if (side === "you" && ability) s.youAbilityRecord = ability;
+  if (!ability) return;
+  if (side === "you") s.youAbilityRecord = ability;
+  else if (side === "opp") s.oppAbilityRecord = ability;
+  else throw new Error(`recordAbility: side "${side}"`);
 }
 
 // The move scripts' own ability checks (jumpifability / jumpifcantmakeasleep /
@@ -839,13 +844,16 @@ function recordScriptAbilityChecks(ctx, s, actor, moveName, moveData, hit, block
       if (fa === "Suction Cups") recordAbility(s, foeSide, fa); break;
     case "EFFECT_EXPLOSION":                          // Cmd_tryexplosion (:6560-6575): the first Damp
       if (ctx.you.ability === "Damp") recordAbility(s, "you", "Damp"); // battler from 0 -- the player
+      else if (ctx.opp.ability === "Damp") recordAbility(s, "opp", "Damp"); // PALACE FORK: then battler 1
       break;
     case "EFFECT_REST":                               // bs:740: target = the user (opponent controller
       if (s[selfSide + "Status"] !== "sleep" && !uproarActive(s)  // sets gBattlerTarget = user)
           && (self.ability === "Insomnia" || self.ability === "Vital Spirit")) recordAbility(s, selfSide, self.ability);
       break;
     case "EFFECT_PERISH_SONG":                        // bs:1578: every battler with Soundproof
-      if (ctx.you.ability === "Soundproof") recordAbility(s, "you", "Soundproof"); break;
+      if (ctx.you.ability === "Soundproof") recordAbility(s, "you", "Soundproof");
+      if (ctx.opp.ability === "Soundproof") recordAbility(s, "opp", "Soundproof"); // PALACE FORK
+      break;
     case "EFFECT_HEAL_BELL":                          // Cmd_healpartystatus (:8394): Heal Bell only
       if (moveName === "Heal Bell" && self.ability === "Soundproof") recordAbility(s, selfSide, "Soundproof"); break;
     case "EFFECT_OHKO": {                             // accuracycheck NO_ACC_CALC_CHECK_LOCK_ON, typecalc, tryKO
@@ -4160,8 +4168,10 @@ const AI_MOVE_ID = new Map(Object.entries(AIK).filter(([k]) => k.startsWith("MOV
   && !k.startsWith("MOVE_POWER_") && !k.startsWith("MOVE_TARGET_") && !k.startsWith("MOVE_MOST") && !k.startsWith("MOVE_NOT")
   && !k.startsWith("MOVE_EFFECT_") && !k.startsWith("MOVE_LIMITATION")).map(([k, v]) => [aiNorm(k.slice(5)), v]));
 const AI_ABILITY_ID = new Map(Object.entries(AIK).filter(([k]) => k.startsWith("ABILITY_")).map(([k, v]) => [aiNorm(k.slice(8)), v]));
+const MOVE_UNAVAILABLE = "(unavailable)"; // PALACE FORK: see recordTargetMoveHistory
 const aiMoveId = (name) => {
   if (name == null) return 0;
+  if (name === MOVE_UNAVAILABLE) return 0xffff; // PALACE FORK: see recordTargetMoveHistory
   const v = AI_MOVE_ID.get(aiNorm(name));
   if (v === undefined) throw new Error(`buildAiView: no MOVE_* id for "${name}"`);
   return v;
@@ -4313,33 +4323,47 @@ function aiQuickClawHolders(opp, you) {
 // :3353). So on turn 1 the AI knows NONE of the player's moves; the engine
 // handed it all four.
 //
-// MOVE_UNAVAILABLE (0xFFFF, a prevented move -- :4412) is recorded too. This
-// engine stores it as null, like MOVE_NONE, which is exact for every read:
-// gBattleMoves[0xFFFF], past the table at 0x083DC88C in the ROM, reads effect
-// 0, power 0, type 0 -- the same as row 0 -- and every if_has_move* /
-// get_last_used_bank_move consumer in data/battle_ai_scripts.s reads only
-// those or compares the id against lists holding neither. What it does not
-// capture is that 0xFFFF OCCUPIES a slot, which can matter only once three
-// entries exist; a three-turn search records at most two, and a third throws.
-function recordTargetMoveHistory(state) {
-  const h = state.youMoveHistory ?? [];
-  const last = state.youLastMove ?? null;
-  if (last === null || h.includes(last)) return h;
-  if (h.length >= 2) {
-    throw new Error(`recordTargetMoveHistory: a third recorded move (${[...h, last].join(", ")}) -- ` +
-      `MOVE_UNAVAILABLE's slot occupancy is not modelled past two entries (Phase D F2c)`);
+// MOVE_UNAVAILABLE (0xFFFF, a prevented move -- :4412) is recorded too. The
+// Arena engine stored it as null, like MOVE_NONE -- exact for every read (the
+// AI reads gBattleMoves[0xFFFF], whose bytes equal row 0's) but not for slot
+// OCCUPANCY, which it could ignore because a three-turn search records at most
+// two entries. PALACE FORK: battles run past three turns, so the occupancy is
+// modelled. gLastMoves is MOVE_NONE only until the mon's first action after
+// entering (ClearBattlerMoveHistory / SwitchInClearSetData); every action after
+// that sets it to the move or to 0xFFFF (MOVEEND_UPDATE_LAST_MOVES). So a null
+// last move once the target is past its first turn IS 0xFFFF, and it is
+// recorded as MOVE_UNAVAILABLE -- a sentinel buildAiView reads as 0xFFFF. A
+// full history (four entries) records nothing more (the loop finds no free
+// slot and no match).
+//
+// `target` is the side whose moves are recorded: "you" for the opponent's AI
+// (the Arena engine's only case), "opp" for the player's (Palace).
+function recordTargetMoveHistory(state, target = "you") {
+  const h = state[target + "MoveHistory"] ?? [];
+  let last = state[target + "LastMove"] ?? null;
+  if (last === null) {
+    if (state[target + "MonFirstTurn"] !== false) return h; // MOVE_NONE: matches a free slot, records nothing
+    last = MOVE_UNAVAILABLE;
   }
+  if (h.includes(last) || h.length >= 4) return h;
   return [...h, last];
 }
 // The state the AI decides in: the history recorded -- but only when the ROM
 // runs the AI at all. A charging / recharging / rampaging mon is forced before
 // action selection, and so is an Encored one (src/battle_main.c:4192-4198 sets
 // the move and never calls the controller), so neither records.
-function aiDecisionState(state) {
-  const forced = state.oppCharging || state.oppRecharge || state.oppLock || state.oppEncoredMove;
+// PALACE FORK: `side` is the deciding battler ("opp" by default, as in the
+// Arena engine). In the Palace the AI also does not run when the nature roll
+// lands on an empty group (ChooseMoveAndTargetInBattlePalace's fallback,
+// src/battle_gfx_sfx_util.c:168-262) -- the caller applies this only on the
+// branches where the AI ran.
+function aiDecisionState(state, side = "opp") {
+  const forced = state[side + "Charging"] || state[side + "Recharge"] || state[side + "Lock"] || state[side + "EncoredMove"];
   if (forced) return state;
-  const h = recordTargetMoveHistory(state);
-  return h === state.youMoveHistory ? state : { ...state, youMoveHistory: h };
+  const target = side === "opp" ? "you" : "opp";
+  const key = target + "MoveHistory";
+  const h = recordTargetMoveHistory(state, target);
+  return h === state[key] ? state : { ...state, [key]: h };
 }
 function buildAiView(opp, you, state, { history = "battle", qc = false, debug = null } = {}) {
   const weather = effectiveWeather(state, you, opp);
@@ -5077,6 +5101,7 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     youSleepTurns: null, oppSleepTurns: null, // turns-remaining counter, rolled ONCE at infliction (see enumerateActionOutcomes)
     youSeeded: false, oppSeeded: false, // Leech Seed — true means THIS side is seeded and drains into the other every end-of-turn
     youMoveHistory: [], // Phase D F2c: BATTLE_HISTORY->usedMoves[player], as the AI has recorded it
+    oppMoveHistory: [], // PALACE FORK: BATTLE_HISTORY->usedMoves[opponent], as the player's AI has recorded it
     youLastMove: null, oppLastMove: null, // gLastMoves[battler] equivalent — set unconditionally whenever that actor acts (src/battle_script_commands.c:4407, gLastMoves[gBattlerAttacker] = gChosenMove), regardless of hit/prevented. Needed by e.g. AI_CV_DefenseUp/AI_CV_SpDefUp's "was I just hit by a physical/special move" check.
     // Substitute: null = no sub. A number = the sub's REMAINING HP pool
     // (starts at floor(maxHP/4), min 1 — src/battle_script_commands.c:7808-7833).
@@ -5109,6 +5134,7 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     // Phase D F2a: BATTLE_HISTORY->abilities[player] -- what the AI has seen of
     // the player's ability (null = nothing recorded). Only the AI reads it.
     youAbilityRecord: null,
+    oppAbilityRecord: null, // PALACE FORK: BATTLE_HISTORY->abilities[opponent], read by the player's AI
     // Perish Song: whether this side has ever been perish-songed this match
     // (Soundproof/already-set exempts a side at cast time — see
     // EFFECT_EXECUTORS.EFFECT_PERISH_SONG for why no countdown/faint field
@@ -5256,6 +5282,20 @@ function recordBattleStartAbilities(base, you, opp) {
       && ["Clear Body", "Hyper Cutter", "White Smoke"].includes(you.ability)) recordAbility(base, "you", you.ability);
   if (you.ability === "Trace" && opp.ability) recordAbility(base, "you", opp.ability);
   else if (opp.ability === "Trace" && you.ability) recordAbility(base, "you", you.ability);
+  // PALACE FORK: the opponent's own record (abilities[1]). The switch-in
+  // weather records its holder (src/battle_util.c:3195 with battler = the
+  // holder); the first of two equal weather abilities activates alone, the
+  // same rule as the player's line above. The PLAYER's Intimidate script
+  // records the opponent's blocking ability (jumpifability BS_TARGET,
+  // data/battle_scripts_1.s:4030-4032 -> RecordAbilityBattle(target)).
+  // INTIMIDATE itself and Trace are recorded onto battler 0 only
+  // (ABILITYEFFECT_INTIMIDATE1 / _TRACE are called with battler 0,
+  // src/battle_main.c:3880-3883), so neither ever writes abilities[1].
+  if (permanentWeatherFromAbility(opp) && (opp.ability !== you.ability || opp.stats.spe > you.stats.spe)) {
+    recordAbility(base, "opp", opp.ability);
+  }
+  if (you.ability === "Intimidate" && base.oppSubstituteHP == null
+      && ["Clear Body", "Hyper Cutter", "White Smoke"].includes(opp.ability)) recordAbility(base, "opp", opp.ability);
 }
 function applySwitchInItems(base, you, opp) {
   if (!you || !opp) return;
@@ -8925,6 +8965,7 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
       s.yourHpPct = hpAdd(s.yourHpPct, heal, you.stats.hp);
     }
     if (opp.ability === "Rain Dish" && s.oppHpPct > 0 && s.oppHpPct < 100) {
+      recordAbility(s, "opp", "Rain Dish"); // PALACE FORK (F2a's site, other battler)
       const heal = Math.max(1, Math.floor(opp.stats.hp / 16));
       s.oppHpPct = hpAdd(s.oppHpPct, heal, opp.stats.hp);
     }
@@ -9002,6 +9043,7 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
     else s.oppHpPct = hpAdd(s.oppHpPct, drain, opp.stats.hp);
   }
   if (s.oppSeeded && s.oppHpPct > 0 && s.yourHpPct > 0) {
+    if (opp.ability === "Liquid Ooze") recordAbility(s, "opp", "Liquid Ooze"); // PALACE FORK: bs:3271, other battler
     const maxDrain = Math.max(1, Math.floor(opp.stats.hp / 8));
     const currentHp = Math.round((s.oppHpPct / 100) * opp.stats.hp);
     const drain = Math.min(maxDrain, currentHp);
@@ -10053,7 +10095,7 @@ function contactAbilityBranches(ctx, state, actor, moveName, moveData, results) 
   // Phase D F2a: a trigger that cannot land is no longer unobservable when the
   // HOLDER is the player -- it records the ability for the AI. Those triggers
   // become a "record" branch; for the AI's own holder they stay dropped.
-  const recordable = !isYou;
+  const recordable = true; // PALACE FORK: both battlers' records are read (an AI on each side)
   if (ab in CONTACT_STATUS_ABILITY) {
     const st = CONTACT_STATUS_ABILITY[ab];
     if (canTakeContactStatus(state, selfSide, st, attacker)) procs.push([1 / 3, { contactProc: st }]);
@@ -10844,7 +10886,7 @@ export {
   scoreOpponentMove, scoreOpponentMoveDist, chooseOpponentMoves,
   // Phase D F13: the interpreter path, and the view it reads.
   chooseOpponentMovesInterp, chooseOpponentMovesHandlers, buildAiView, selectableMoves,
-  aiDecisionState, recordTargetMoveHistory, // Phase D F2c
+  aiDecisionState, recordTargetMoveHistory, MOVE_UNAVAILABLE, // Phase D F2c (+ Palace: two-sided)
   typeCalcRows, // F17
   aiTurnPlans, // F14
   EFFECTIVENESS_CLEARED_EFFECTS, // F21
@@ -10856,7 +10898,7 @@ export {
   enumerateAiRollOutcomes, AI_SIM_ROLLS, buildAiDamageState,
   buildStartState, resolveTurn,
   // B3 batch 7a: the volFlags accessor, for tests that inspect a folded flag.
-  vf, VF,
+  vf, VF, TF_YOU_FLINCHED, TF_OPP_FLINCHED, TF_YOU_UNABLE, TF_OPP_UNABLE,
   MOVES, AI_HANDLERS,
   // Phase D F11: the opponent as the ROM builds it (friendship by Frustration).
   buildFrontierOpponent,
