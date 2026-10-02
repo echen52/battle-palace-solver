@@ -1,4 +1,14 @@
-// ── logic.js (v2) ──────────────────────────────────────────────────────────
+// ── logic.js (Palace fork) ─────────────────────────────────────────────────
+// PALACE FORK of the Battle Arena engine (battle_arena_assistant 04ee03b; see
+// docs/PROVENANCE.md). The Arena's judging is REMOVED: no Mind / Skill state,
+// no Body terminal, no 3-turn search. What remains is the battle itself --
+// damage, move effects, abilities, items, the turn order and the ROM's AI
+// program -- unchanged and pinned to the Arena engine by
+// tests/test-fork-equivalence.mjs. Comments below that still mention Mind,
+// Skill or "the Arena" are history from the source engine; the code they
+// described is gone.
+//
+// (Original header follows.)
 // Battle Arena optimizer — generalized engine.
 //
 // Design: two mons are described by plain config objects (species looked up
@@ -4762,55 +4772,6 @@ function chooseOpponentMovesHandlers(opp, you, state) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 6. ARENA JUDGE SCORING
-// ─────────────────────────────────────────────────────────────────────────
-
-function mindDelta(moveName) {
-  return MOVES[moveName]?.mindRating ?? 0;
-}
-
-// A7: every value here is now DERIVED from the two source mechanisms via
-// arenaSkillDelta, not typed in. The outcome names are this engine's; the map
-// to BattleArena_AddSkillPoints' branches is stated per case.
-//
-// The five paths sim-audit.md §3.2 called "correct by coincidence of coverage"
-// are the ones that reach `noEffect` with no matching printed string, and they
-// are now derived rather than coincidental:
-//   Clear Body / White Smoke stat-block : +1 fallthrough -3 string  = -2
-//   Limber (and the other ability status immunities) : +1 -3        = -2
-//   already-statused                    : alreadyStatused branch    = -2
-//   type-immune status                  : ButItFailed -> noEffect   = -2
-//   Safeguard                           : +1 -3 string              = -2
-// They all land on -2, which is why one "failed" return value was faithful to
-// all five; the difference is that the engine can now say WHY for each.
-function skillDelta(outcome) {
-  switch (outcome) {
-    case "landedSuperEffective": return arenaSkillDelta("superEffective");
-    case "landedMixed": return arenaSkillDelta("mixed");
-    case "landed": return arenaSkillDelta("landed");
-    case "landedNVE": return arenaSkillDelta("notVeryEffective");
-    // A miss sets MOVE_RESULT_MISSED, which composites into NO_EFFECT
-    // (include/constants/battle.h:227); MISS_TYPE is not B_MSG_PROTECTED for an
-    // ordinary accuracy miss, so the -2 fires.
-    case "miss": return arenaSkillDelta("noEffect");
-    case "noEffect": return arenaSkillDelta("noEffect");
-    // "blocked" REMOVED (was a flat -3) — ability/item blocks do not share a
-    // single Skill delta in source. See ABILITY_BLOCK_SKILL_DELTA below;
-    // resolveAbilityInteraction() attaches the correct per-ability value
-    // directly rather than routing through this generic outcome dispatch.
-    default: return 0;
-  }
-}
-
-function classifyOutcome(hit, eff) {
-  if (!hit) return "miss";
-  if (eff === 0) return "noEffect";
-  if (eff > 1) return "landedSuperEffective";
-  if (eff < 1) return "landedNVE";
-  return "landed";
-}
-
-// ─────────────────────────────────────────────────────────────────────────
 // 7. TURN RESOLUTION + BACKTRACKING SEARCH
 //    `you` and `opp` are now parameters threaded through every function
 //    instead of hardcoded globals.
@@ -5161,8 +5122,6 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     // it. DECAY: resolveTurn clears it at every simulated turn advance, so
     // lookahead turns 2+ always score as past-first regardless of input.
     oppMonFirstTurn: true,
-    mindYou: 0, mindOpp: 0,
-    skillYou: 0, skillOpp: 0,
     // Per-turn damage received, for Counter/Mirror Coat. Reset at the start
     // of each turn (see resolveTurn) — only reflects damage taken THIS turn,
     // matching real mechanics (Counter/Mirror Coat fail if the user acted
@@ -5595,7 +5554,6 @@ function applyFlinch(ctx, s, actor, foeHadSubstitute, certain) {
   if (foe.ability === "Shield Dust" || foeHadSubstitute || (isYou ? s.oppHpPct : s.yourHpPct) <= 0) return;
   if (foe.ability === "Inner Focus") {
     if (certain) {
-      s[isYou ? "skillYou" : "skillOpp"] -= 3;
       recordAbility(s, isYou ? "opp" : "you", "Inner Focus"); // F2a
     }
     return;
@@ -5653,7 +5611,6 @@ function applySecondary(ctx, s, actor, moveName, moveData, trig, foeHadSubstitut
   if (!spec.tri && chance >= 100 && foe.ability === SECONDARY_PREVENT_ABILITY[base]) {
     // BattleScript_*Prevention prints through printfromtable, as the ATTACKER
     // (PrepareStringBattle(..., gBattlerAttacker), :2187) -- a flat -3.
-    s[isYou ? "skillYou" : "skillOpp"] -= 3;
     return;
   }
   if (base === "freeze" && effectiveWeather(s, ctx.you, ctx.opp) === "sun") return; // :2389-2390
@@ -6183,191 +6140,37 @@ function typeEffectivenessBreakdown(moveType, defTypes, foresighted = false) {
   return { hadSuper, hadNVE };
 }
 
-// Ability-block Skill deltas — deliberately NOT one flat number. Two
-// INDEPENDENT pokeemerald mechanisms both write to arenaSkillPoints for the
-// same move: BattleArena_AddSkillPoints (src/battle_arena.c:588-622, fired
-// from Cmd_end, src/battle_script_commands.c:3950-3957 — once per move,
-// branches on gMoveResultFlags) and BattleArena_DeductSkillPoints
-// (src/battle_arena.c:624-652, fired from PlayerHandlePrintString /
-// OpponentHandlePrintString — src/battle_controller_player.c:2543-2555,
-// src/battle_controller_opponent.c:1522-1533 — once per matching printed
-// string, mid-script, well before Cmd_end runs). Neither gates the other, so
-// both fire for every ability block; the two mechanisms disagree on which
-// abilities cost what, and the combined total is per-ability, not a shared
-// constant:
-//
-// Wonder Guard / Levitate — both scored -2, DeductSkillPoints contributes 0:
-//   Cmd_typecalc (src/battle_script_commands.c:1409-1419 Wonder Guard,
-//   1375-1383 Levitate) sets MOVE_RESULT_MISSED (Levitate also sets
-//   MOVE_RESULT_DOESNT_AFFECT_FOE), MISS_TYPE = B_MSG_AVOIDED_DMG /
-//   B_MSG_GROUND_MISS. AddSkillPoints' NO_EFFECT branch fires (-2,
-//   battle_arena.c:600-604: `!(MISSED) || MISS_TYPE != B_MSG_PROTECTED` is
-//   true either way, since MISS_TYPE is neither case B_MSG_PROTECTED here).
-//   The miss-strings this prints (STRINGID_AVOIDEDDAMAGE,
-//   STRINGID_PKMNMAKESGROUNDMISS — src/battle_message.c:895-896) are NOT
-//   among the 18 strings DeductSkillPoints matches (battle_arena.c:630-649),
-//   so it contributes 0. Net: -2 + 0 = -2.
-//   CAVEAT: verified for ordinary power-based attacks routing through the
-//   standard Cmd_typecalc immunity block; NOT exhaustively re-checked
-//   against OHKO/fixed-damage move variants, which may resolve
-//   effectiveness through a different path.
-//
-// Soundproof / Flash Fire — both scored -2, via the OPPOSITE split (+1 / -3):
-//   Soundproof blocks at Cmd_attackcanceler (AbilityBattleEffects
-//   ABILITYEFFECT_MOVES_BLOCK, src/battle_util.c:2659-2674); Flash Fire
-//   blocks at the accuracycheck-adjacent ABILITYEFFECT_ABSORBING check
-//   (src/battle_util.c:2703-2727, reached via JumpIfMoveFailed,
-//   src/battle_script_commands.c:1009-1025). Both happen BEFORE typecalc,
-//   so no MOVE_RESULT_* flag is ever set — AddSkillPoints' whole branch
-//   chain falls through to the final fallback (+1, battle_arena.c:617-620).
-//   But the printed string IS in DeductSkillPoints' list: STRINGID_
-//   PKMNSXBLOCKSY for Soundproof (data/battle_scripts_1.s:4162, matched at
-//   battle_arena.c:637); STRINGID_PKMNRAISEDFIREPOWERWITH or STRINGID_
-//   PKMNSXMADEYINEFFECTIVE for Flash Fire (src/battle_message.c:1242-1246,
-//   matched at battle_arena.c:645/635) — both -3. Net: +1 + -3 = -2.
-//
-// Volt Absorb / Water Absorb — scored -5, both mechanisms penalize:
-//   BattleScript_MoveHPDrain (data/battle_scripts_1.s:4078-4089) sets
-//   MOVE_RESULT_DOESNT_AFFECT_FOE (line 4088) — AddSkillPoints' NO_EFFECT
-//   branch fires (-2, battle_arena.c:600-604: MISSED is NOT set here, so
-//   `!(MISSED)` alone is true). It also prints STRINGID_PKMNRESTOREDHPUSING
-//   (line 4086), which IS in DeductSkillPoints' list (battle_arena.c:640):
-//   -3. Net: -2 + -3 = -5.
-// ── A7: Arena Skill as the TWO SOURCE MECHANISMS, not hand-netted constants ──
-//
-// Source writes arenaSkillPoints from two independent places, neither gating
-// the other:
-//   1. BattleArena_AddSkillPoints (src/battle_arena.c:588-622), once per move
-//      from Cmd_end (src/battle_script_commands.c:3951-3953), branching on
-//      gMoveResultFlags.
-//   2. BattleArena_DeductSkillPoints (src/battle_arena.c:624-652), a flat -3
-//      per MATCHING PRINTED STRING, fired from PlayerHandlePrintString /
-//      OpponentHandlePrintString (src/battle_controller_player.c:2554,
-//      src/battle_controller_opponent.c:1532).
-//
-// This engine used to model (1) only, and paper over (2) with six hand-computed
-// NET values. Those six numbers were right, and five further block paths were
-// right by coincidence of coverage -- but nothing derived them, so any new
-// mechanic had to have its Skill re-derived by hand. Now both mechanisms exist
-// and every net falls out of them.
-//
-// CORRECTION TO THE RECORD: this file previously said "the 18 strings
-// DeductSkillPoints matches", and sim-audit.md §3.2 repeated it. The switch has
-// NINETEEN cases (src/battle_arena.c:630-649, counted). Off by one, corrected
-// here and in the audit.
-const ARENA_DEDUCT_STRINGS = new Set([
-  "STRINGID_PKMNSXMADEYUSELESS", "STRINGID_PKMNSXMADEITINEFFECTIVE",
-  "STRINGID_PKMNSXPREVENTSFLINCHING", "STRINGID_PKMNSXBLOCKSY2",
-  "STRINGID_PKMNSXPREVENTSYLOSS", "STRINGID_PKMNSXMADEYINEFFECTIVE",
-  "STRINGID_PKMNSXPREVENTSBURNS", "STRINGID_PKMNSXBLOCKSY",
-  "STRINGID_PKMNPROTECTEDBY", "STRINGID_PKMNPREVENTSUSAGE",
-  "STRINGID_PKMNRESTOREDHPUSING", "STRINGID_PKMNPREVENTSPARALYSISWITH",
-  "STRINGID_PKMNPREVENTSROMANCEWITH", "STRINGID_PKMNPREVENTSPOISONINGWITH",
-  "STRINGID_PKMNPREVENTSCONFUSIONWITH", "STRINGID_PKMNRAISEDFIREPOWERWITH",
-  "STRINGID_PKMNANCHORSITSELFWITH", "STRINGID_PKMNPREVENTSSTATLOSSWITH",
-  "STRINGID_PKMNSTAYEDAWAKEUSING",
-]);
-
-// BattleArena_AddSkillPoints' branch chain (src/battle_arena.c:588-622), as a
-// pure function of which branch the move result lands on.
-//   alreadyStatused  :595-599  the setalreadystatusedmoveattempt bit
-//   noEffect         :600-604  NO_EFFECT and NOT (MISSED with MISS_TYPE==PROTECTED)
-//   protectedBlock   :600-604  NO_EFFECT but the inner condition is false, so 0
-//   mixed            :605-608  SUPER_EFFECTIVE && NOT_VERY_EFFECTIVE
-//   superEffective   :609-612
-//   notVeryEffective :613-616
-//   landed           :617-620  the final else, when the attacker is not itself protected
-//   selfProtected    :617-620  ...and 0 when it is
-const ARENA_ADD_SKILL = {
-  alreadyStatused: -2, noEffect: -2, protectedBlock: 0, mixed: 1,
-  superEffective: 2, notVeryEffective: -1, landed: 1, selfProtected: 0,
-  // Phase D F22: AddSkillPoints is gated on HITMARKER_OBEYS (src/battle_arena.c:
-  // 592), which Cmd_attackcanceler sets only at :960 -- AFTER the
-  // ABILITYEFFECT_MOVES_BLOCK return at :932. A move blocked there scores
-  // nothing at `end`.
-  beforeObeys: 0,
-};
-
-// The composite. `printed` is the list of source string IDs this resolution
-// would print; each one that DeductSkillPoints matches costs a further -3.
-function arenaSkillDelta(addBranch, printed = []) {
-  if (!(addBranch in ARENA_ADD_SKILL)) throw new Error(`arenaSkillDelta: unknown AddSkillPoints branch "${addBranch}"`);
-  let d = ARENA_ADD_SKILL[addBranch];
-  for (const s of printed) {
-    if (!s.startsWith("STRINGID_")) throw new Error(`arenaSkillDelta: "${s}" is not a STRINGID_* constant`);
-    if (ARENA_DEDUCT_STRINGS.has(s)) d -= 3;
-  }
-  return d;
-}
-
-// The six ability blocks, now expressed as what source actually does rather
-// than as a net number. Each entry is (AddSkillPoints branch, printed strings);
-// the delta is derived. The per-ability reasoning and its anchors are in the
-// long comment that used to sit above the hand-netted table, retained below.
-//
-// Wonder Guard / Levitate: Cmd_typecalc (src/battle_script_commands.c:1409-1419
-//   / 1375-1383) sets MOVE_RESULT_MISSED (Levitate also DOESNT_AFFECT_FOE) with
-//   MISS_TYPE = B_MSG_AVOIDED_DMG / B_MSG_GROUND_MISS -- neither is
-//   B_MSG_PROTECTED, so the NO_EFFECT branch's -2 fires. The strings it prints
-//   (STRINGID_AVOIDEDDAMAGE / STRINGID_PKMNMAKESGROUNDMISS,
-//   src/battle_message.c:895-896) are NOT in DeductSkillPoints' switch.
-// Soundproof / Flash Fire: both block BEFORE typecalc (src/battle_util.c:
-//   2659-2674 ABILITYEFFECT_MOVES_BLOCK; :2703-2727 ABILITYEFFECT_ABSORBING),
-//   so no MOVE_RESULT_* is ever set and their strings ARE matched, for -3.
-//   Flash Fire's AddSkillPoints then falls through to +1; Soundproof's never
-//   runs (Phase D F22: the block precedes HITMARKER_OBEYS).
-// Volt Absorb / Water Absorb: BattleScript_MoveHPDrain
-//   (data/battle_scripts_1.s:4078-4089) sets MOVE_RESULT_DOESNT_AFFECT_FOE
-//   (line 4088) -> -2, AND prints STRINGID_PKMNRESTOREDHPUSING (line 4086) ->
-//   -3. Both mechanisms penalise; this is the only pair where they do.
-const ABILITY_BLOCK_SOURCE = {
-  "Wonder Guard": { addBranch: "noEffect", printed: ["STRINGID_AVOIDEDDAMAGE"] },
-  "Levitate": { addBranch: "noEffect", printed: ["STRINGID_PKMNMAKESGROUNDMISS"] },
-  // F22: Soundproof is ABILITYEFFECT_MOVES_BLOCK, before HITMARKER_OBEYS (see
-  // ARENA_ADD_SKILL.beforeObeys): -3 alone, not -3 +1. Flash Fire's
-  // ABSORBING check is after it (:1021), so its +1 stands.
-  "Soundproof": { addBranch: "beforeObeys", printed: ["STRINGID_PKMNSXBLOCKSY"] },
-  "Flash Fire": { addBranch: "landed", printed: ["STRINGID_PKMNRAISEDFIREPOWERWITH"] },
-  "Volt Absorb": { addBranch: "noEffect", printed: ["STRINGID_PKMNRESTOREDHPUSING"] },
-  "Water Absorb": { addBranch: "noEffect", printed: ["STRINGID_PKMNRESTOREDHPUSING"] },
-};
-
-const ABILITY_BLOCK_SKILL_DELTA = Object.fromEntries(
-  Object.entries(ABILITY_BLOCK_SOURCE).map(([ability, { addBranch, printed }]) =>
-    [ability, arenaSkillDelta(addBranch, printed)]),
-);
-
 // Resolves ability-based interactions that override normal damage/type
 // resolution. Called before normal damage calc for any power>0 move, and
 // before status-effect application for power===0 moves (Soundproof blocks
 // both). Returns one of:
 //   { type: "normal" }                                          — proceed as usual
-//   { type: "blocked", skillDelta }                              — ability/item block (see ABILITY_BLOCK_SKILL_DELTA above)
-//   { type: "absorb", healFraction: 0.25, skillDelta }           — Volt/Water Absorb: heal defender instead
-//   { type: "flashFireTrigger", skillDelta }                     — Flash Fire: no damage, sets standing boost flag
+//   { type: "blocked" }                         — ability block
+//   { type: "absorb", healFraction: 0.25 }      — Volt/Water Absorb: heal defender instead
+//   { type: "flashFireTrigger" }                — Flash Fire: no damage, sets standing boost flag
 function resolveAbilityInteraction(moveName, moveData, attacker, defender, defenderForesighted = false) {
   if (defender.ability === "Soundproof" && SOUND_MOVES.has(moveName)) {
-    return { type: "blocked", skillDelta: ABILITY_BLOCK_SKILL_DELTA["Soundproof"] };
+    return { type: "blocked" };
   }
   if (moveData.power === 0) return { type: "normal" };
 
   if (defender.ability === "Levitate" && moveData.type === "Ground") {
-    return { type: "blocked", skillDelta: ABILITY_BLOCK_SKILL_DELTA["Levitate"] };
+    return { type: "blocked" };
   }
   if (defender.ability === "Volt Absorb" && moveData.type === "Electric") {
-    return { type: "absorb", healFraction: 0.25, skillDelta: ABILITY_BLOCK_SKILL_DELTA["Volt Absorb"] };
+    return { type: "absorb", healFraction: 0.25 };
   }
   if (defender.ability === "Water Absorb" && moveData.type === "Water") {
-    return { type: "absorb", healFraction: 0.25, skillDelta: ABILITY_BLOCK_SKILL_DELTA["Water Absorb"] };
+    return { type: "absorb", healFraction: 0.25 };
   }
   if (defender.ability === "Flash Fire" && moveData.type === "Fire") {
-    return { type: "flashFireTrigger", skillDelta: ABILITY_BLOCK_SKILL_DELTA["Flash Fire"] };
+    return { type: "flashFireTrigger" };
   }
   // Phase D F42: CheckWonderGuardAndLevitate returns at once for Struggle
   // (src/battle_script_commands.c:1432).
   if (defender.ability === "Wonder Guard" && moveName !== "Struggle") {
     const { hadSuper, hadNVE } = typeEffectivenessBreakdown(moveData.type, defender.types, defenderForesighted);
-    if (!(hadSuper && !hadNVE)) return { type: "blocked", skillDelta: ABILITY_BLOCK_SKILL_DELTA["Wonder Guard"] }; // only a CLEAN super-effective hit gets through
+    if (!(hadSuper && !hadNVE)) return { type: "blocked" }; // only a CLEAN super-effective hit gets through
   }
   return { type: "normal" };
 }
@@ -7841,14 +7644,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   if (statusPrevented && s[actor === "you" ? "youRecharge" : "oppRecharge"]) {
     moveName = s[actor === "you" ? "youRecharge" : "oppRecharge"].move;
   }
-  // B3 batch 2: MIND IS SCORED ON THE SELECTED MOVE, not the called one.
-  // BattleArena_AddMindPoints runs in HandleAction_UseMove (src/battle_util.c:
-  // 289) with gCurrentMove still the move the mon chose -- Metronome, Mirror
-  // Move, Sleep Talk -- because the substitution happens later, inside that
-  // move's script. The note above had Arena scoring following the called move;
-  // for Mind that was wrong (Metronome rates 0, a called Earthquake rates 1).
-  // Skill is read off the RESULT flags at Cmd_end, so it does follow the call.
-  const mindMove = calledMove ? chosenMoveName : moveName;
   // B3 batch 2: whether the foe had a Substitute BEFORE this move. Source keeps
   // STATUS2_SUBSTITUTE set until the end of the turn even after the doll breaks
   // (it is cleared in TurnValuesCleanUp, src/battle_main.c:4887-4888), and
@@ -7863,8 +7658,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   // against its Ghost typing -- see typeEffectiveness).
   const foeForesighted = isYou ? s.oppForesighted : s.youForesighted;
   const moveData = battleMoveData(selfMon, moveName);
-  const mindKey = isYou ? "mindYou" : "mindOpp";
-  const skillKey = isYou ? "skillYou" : "skillOpp";
   const selfHpKey = isYou ? "yourHpPct" : "oppHpPct";
   const foeHpKey = isYou ? "oppHpPct" : "yourHpPct";
   const selfStages = isYou ? s.youStages : s.oppStages;
@@ -7920,7 +7713,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   if (statusPrevented && cancelReason === "bideStore") {
     const lk = isYou ? "youLock" : "oppLock";
     s[lk] = { ...s[lk], n: s[lk].n - 1 };
-    s[mindKey] += mindDelta(mindMove);
     return;
   }
   if (statusPrevented) {
@@ -7946,7 +7738,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // Paralysis full-para / still-frozen: Mind scores off selection
     // regardless (unconditional), no Skill (HITMARKER_OBEYS unset), no
     // damage or effect happens at all.
-    s[mindKey] += mindDelta(mindMove);
     return;
   }
 
@@ -7956,7 +7747,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // damage (unlike confusion's self-hit branch) and no Skill change.
     // B3 batch 2: and it cancels multi-turn moves (src/battle_util.c:2213).
     cancelMultiTurnMoves(s, actor);
-    s[mindKey] += mindDelta(mindMove);
     return;
   }
 
@@ -7971,11 +7761,9 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const curHp = Math.round((s[selfHpKey] / 100) * selfMon.stats.hp);
     if (focusBanded && dmg >= curHp) dmg = curHp - 1;
     s[selfHpKey] = hpSub(s[selfHpKey], dmg, selfMon.stats.hp);
-    s[mindKey] += mindDelta(mindMove);
     return;
   }
 
-  s[mindKey] += mindDelta(mindMove);
   recordScriptAbilityChecks(ctx, s, actor, moveName, moveData, hit, blockedByProtect); // Phase D F2a
 
   // Explosion/Self Destruct (effect: "EFFECT_EXPLOSION"): the user's HP is
@@ -7999,35 +7787,24 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   // BattleScript_DampStopsExplosion prints STRINGID_PKMNPREVENTSUSAGE with no
   // result flag (+1 - 3). After attackcanceler, so into a Protect too.
   if (moveData.effect === "EFFECT_EXPLOSION" && (ctx.you.ability === "Damp" || ctx.opp.ability === "Damp")) {
-    s[skillKey] += arenaSkillDelta("landed", ["STRINGID_PKMNPREVENTSUSAGE"]);
     return;
   }
   if (moveData.effect === "EFFECT_EXPLOSION") s[selfHpKey] = 0;
 
-  // Phase D F40: TEETER DANCE decides its own Skill, in its loop's order
-  // (data/battle_scripts_1.s:2571-2621). Each pass opens with
-  // movevaluescleanup (src/battle_script_commands.c:3621-3630: result flags
-  // and MISS_TYPE zeroed) and skips the user AFTER it; AddSkillPoints runs at
-  // `end` on the last pass. The player is battler 0 and the opponent battler 1,
-  // so the player's dance ends on the foe's pass (its flags stand) and the
-  // opponent's ends on its own (a miss or a Protect-block is wiped: +1). The
-  // attackcanceler's Protect flag (:992-1001) is wiped by the first cleanup, so
-  // on the foe's pass Own Tempo, a Substitute and already-confused come first;
-  // Protect and accuracy only at its accuracycheck; Safeguard after that.
+  // Phase D F40: TEETER DANCE runs its own loop (data/battle_scripts_1.s:
+  // 2571-2621); each pass opens with movevaluescleanup and skips the user. The
+  // attackcanceler's Protect flag (src/battle_script_commands.c:992-1001) is
+  // wiped by the first cleanup, so on the foe's pass Own Tempo, a Substitute
+  // and already-confused come first; Protect and accuracy only at its
+  // accuracycheck; Safeguard after that. (Palace fork: the Arena Skill
+  // bookkeeping this block also did is removed.)
   if (moveData.effect === "EFFECT_TEETER_DANCE") {
     const t = confusionTarget(s, actor, ctx);
-    const lastPassIsOwn = !isYou;
     // the attackcanceler still cancels the user's multi-turn moves into Protect
     if (blockedByProtect) cancelMultiTurnMoves(s, actor);
-    let outcome;
-    if (t.mon.ability === "Own Tempo") outcome = arenaSkillDelta("landed", ["STRINGID_PKMNPREVENTSCONFUSIONWITH"]);
-    else if (s[t.subKey] != null) outcome = arenaSkillDelta("landed", ["STRINGID_BUTITFAILED"]);
-    else if (s[t.confKey]) outcome = arenaSkillDelta("alreadyStatused");
-    else if (blockedByProtect) outcome = lastPassIsOwn ? arenaSkillDelta("landed") : arenaSkillDelta("protectedBlock");
-    else if (!hit) outcome = lastPassIsOwn ? arenaSkillDelta("landed") : skillDelta("miss");
-    else if (s[t.safeguardKey] != null) outcome = arenaSkillDelta("landed", ["STRINGID_PKMNUSEDSAFEGUARD"]);
-    else { s[t.confKey] = true; outcome = arenaSkillDelta("landed"); }
-    s[skillKey] += outcome;
+    const fails = t.mon.ability === "Own Tempo" || s[t.subKey] != null || s[t.confKey]
+      || blockedByProtect || !hit || s[t.safeguardKey] != null;
+    if (!fails) s[t.confKey] = true;
     return;
   }
 
@@ -8059,7 +7836,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   // 2048-2052) -- so a late Fake Out into Protect reads as PROTECTED (handled
   // just above), and only otherwise as FAILED, from attackstring.
   if (moveData.effect === "EFFECT_FAKE_OUT" && !s[isYou ? "youMonFirstTurn" : "oppMonFirstTurn"]) {
-    s[skillKey] += skillDelta("noEffect");
     return;
   }
 
@@ -8073,7 +7849,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   if (moveData.effect === "EFFECT_TRANSFORM") {
     const foeTf = s[isYou ? "oppTransform" : "youTransform"];
     const foeCharging = s[isYou ? "oppCharging" : "youCharging"];
-    if (foeTf || foeCharging?.invulnBit) { s[skillKey] += skillDelta("noEffect"); return; }
+    if (foeTf || foeCharging?.invulnBit) return;
     const { hp: _hp, ...nonHp } = foeMon.stats;
     s[isYou ? "youTransform" : "oppTransform"] = {
       species: foeMon.species, types: [...foeMon.types], ability: foeMon.ability,
@@ -8090,7 +7866,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     s[isYou ? "youMoves" : "oppMoves"] = null;           // mimickedMoves = 0
     s[isYou ? "youAbilityOverride" : "oppAbilityOverride"] = null; // the copied ability replaces any swap
     s[selfLastMoveKey] = null;                          // gChosenMove = MOVE_UNAVAILABLE
-    s[skillKey] += skillDelta("landed");
     return;
   }
 
@@ -8108,7 +7883,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const known = selfMon.moves;
     if (foeHadSubstitute || !hit || copy == null || s[isYou ? "youTransform" : "oppTransform"]
         || ["Metronome", "Struggle", "Sketch", "Mimic"].includes(copy) || known.includes(copy)) {
-      s[skillKey] += skillDelta("noEffect");
       return;
     }
     const slot = known.indexOf(chosenMoveName);
@@ -8119,7 +7893,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const next = known.slice();
     next[slot] = copy;
     s[isYou ? "youMoves" : "oppMoves"] = next;
-    s[skillKey] += skillDelta("landed");
     return;
   }
 
@@ -8129,11 +7902,10 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   // target's side statuses (screens) and today's stages. +1 (no result flag).
   if (moveData.effect === "EFFECT_FUTURE_SIGHT") {
     const fsKey = isYou ? "oppFutureSight" : "youFutureSight";
-    if (s[fsKey]) { s[skillKey] += skillDelta("noEffect"); return; }
+    if (s[fsKey]) return;
     const base = calcDamage(selfMon, foeMon, moveName,
       { ...battleDamageOptions(ctx, s, actor, moveData), untyped: true, rollFrac: 1 });
     s[fsKey] = { move: moveName, n: 3, dmg: base };
-    s[skillKey] += skillDelta("landed");
     return;
   }
 
@@ -8147,7 +7919,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // setbide locks the move, zeroes gBideDmg and sets the counter to 2.
       // Skill: obeyed, no result flags, so +1 (BattleArena_AddSkillPoints).
       s[lk] = { move: moveName, kind: "bide", n: 2, dmg: 0 };
-      s[skillKey] += skillDelta("landed");
       return;
     }
     // The UNLEASH (the gate let it through at counter 1 -> 0).
@@ -8158,7 +7929,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     s[lk] = null;
     if (stored === 0) {
       // BattleScript_BideNoEnergyToAttack -> ButItFailed.
-      s[skillKey] += skillDelta("noEffect");
       return;
     }
     bideUnleash = stored * 2;
@@ -8176,11 +7946,9 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // target never even reaches the roll.
     const eff = typeEffectiveness(moveData.type, foeMon.types, foeForesighted);
     if (eff === 0) {
-      s[skillKey] += skillDelta("noEffect");
       return;
     }
     if (!hit) {
-      s[skillKey] += skillDelta("miss");
       return;
     }
     const foeEndureKey = isYou ? "oppEndureActive" : "youEndureActive";
@@ -8204,7 +7972,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // regardless of the move's real type matchup, NEVER the super/not-very-
     // effective ±2/-1 bonus a normal attack of the same type would get.
     // Deliberately NOT classifyOutcome(hit, eff).
-    s[skillKey] += skillDelta("landed");
     return;
   }
 
@@ -8224,7 +7991,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   if (moveData.effect === "EFFECT_COUNTER" || moveData.effect === "EFFECT_MIRROR_COAT") {
     const received = counterReceived(s, actor, moveData);
     if (received === null) {
-      s[skillKey] += skillDelta("noEffect");
       return;
     }
     counterReflect = received * 2;
@@ -8242,10 +8008,8 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // a DIFFERENT field from .protected — so the final fallback branch in
       // BattleArena_AddSkillPoints (!gProtectStructs[battler].protected)
       // still evaluates true for Endure, landing on the default +1.
-      s[skillKey] += skillDelta("landed");
     } else {
       s[usesKey] = 0;
-      s[skillKey] += skillDelta("noEffect"); // failure sets MOVE_RESULT_MISSED, MISS_TYPE=B_MSG_PROTECT_FAILED (not B_MSG_PROTECTED) — scored as a real miss (-2)
     }
     return;
   }
@@ -8265,7 +8029,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // No skillKey change — success is genuinely neutral, see above.
     } else {
       s[usesKey] = 0;
-      s[skillKey] += skillDelta("noEffect");
     }
     return;
   }
@@ -8286,7 +8049,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     if (moveData.effect === "EFFECT_SKULL_BASH") {
       bumpStage(isYou ? s.youStages : s.oppStages, "def", 1);
     }
-    s[skillKey] += skillDelta("landed");
     return;
   }
   if (chargesThisTurn && s[selfChargingKey]) {
@@ -8299,7 +8061,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // +1, same as a normal successful hit (source-confirmed — the charge
     // turn's gMoveResultFlags stay all-clear, hitting the final +1 branch).
     s[selfChargingKey] = { move: moveName, invulnBit: SEMI_INVULN_BIT[moveName] };
-    s[skillKey] += skillDelta("landed");
     return;
   }
   if (moveData.effect === "EFFECT_SEMI_INVULNERABLE" && s[selfChargingKey]) {
@@ -8391,7 +8152,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // `setdamagetohealthdifference`'s ButItFailed branch before the accuracy
     // check ever runs (data/battle_scripts_1.s:3687), so this is a FAILURE, not
     // a miss, and it is enumerated as a single branch upstream.
-    s[skillKey] += skillDelta("noEffect");
     return;
   }
   if (variablePower === "heal") {
@@ -8419,12 +8179,10 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // BattleScript_AlreadyAtFullHp (src/battle_script_commands.c:8641-8644 ->
       // data/battle_scripts_1.s:2042-2046): no flag, no deducting string, +1.
       // Phase D F37: this scored noEffect (-2).
-      s[skillKey] += skillDelta("landed");
       return;
     }
     const heal = Math.max(1, Math.floor(foeMon.stats.hp / 4));
     s[foeHpKey] = hpAdd(s[foeHpKey], heal, foeMon.stats.hp);
-    s[skillKey] += skillDelta("landed");
     return;
   }
 
@@ -8441,7 +8199,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // JumpIfMoveFailed :1021); Soundproof was recorded at the canceler.
     if (interaction.type !== "normal") recordAbility(s, isYou ? "opp" : "you", foeMon.ability);
     if (interaction.type === "blocked") {
-      s[skillKey] += interaction.skillDelta;
       return;
     }
     if (interaction.type === "absorb") {
@@ -8450,12 +8207,10 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       if (s[foeHpKey] < 100) {
         s[foeHpKey] = hpAdd(s[foeHpKey], healAmount, foeMon.stats.hp);
       }
-      s[skillKey] += interaction.skillDelta; // still an ability-block for Skill purposes
       return;
     }
     if (interaction.type === "flashFireTrigger") {
       s[isYou ? "oppFlashFireActive" : "youFlashFireActive"] = true;
-      s[skillKey] += interaction.skillDelta;
       return;
     }
   }
@@ -8493,7 +8248,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // no-effect -2 this scored. (The user cannot be protected: it is using
     // Focus Punch.)
     if (moveData.effect === "EFFECT_FOCUS_PUNCH" && (isYou ? s.youDamageTaken : s.oppDamageTaken)) {
-      s[skillKey] += skillDelta("landed");
       return;
     }
     // BattleScript_EffectSnore (data/battle_scripts_1.s:2254-2262): jumpifstatus
@@ -8502,7 +8256,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // failure, not a miss and not a no-op. The exemption that lets a SLEEPING
     // mon select it at all is upstream in enumerateActionOutcomes.
     if (moveData.effect === "EFFECT_SNORE" && s[selfStatusKey] !== "sleep") {
-      s[skillKey] += skillDelta("noEffect");
       return;
     }
     // Phase D F35: BattleScript_DreamEaterNoEffect -> BattleScript_WasntAffected
@@ -8512,7 +8265,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // -2 this scored (emulator: traces-given/00510). Substitute takes the same
     // path.
     if (moveData.effect === "EFFECT_DREAM_EATER" && (s[foeStatusKey] !== "sleep" || s[isYou ? "oppSubstituteHP" : "youSubstituteHP"] != null)) {
-      s[skillKey] += skillDelta("landed");
       return;
     }
     const atkStatKey = moveData.category === "physical" ? "atk" : "spa";
@@ -8543,7 +8295,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // Up was rolled; Phase D F30's ROLL_EXEMPT, derived from the scripts.)
       const spKey = isYou ? "youStockpile" : "oppStockpile";
       if (s[spKey] === 0) {
-        s[skillKey] += skillDelta("noEffect");
         return;
       }
       s[spKey] = 0;
@@ -8990,17 +8741,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     if (hit && eff !== 0 && moveFlags(chosenMoveName).mirrorMoveAffected && s[foeHpKey] > 0) {
       s[isYou ? "oppLastTakenMove" : "youLastTakenMove"] = chosenMoveName;
     }
-    // B3 batch 4c: Bide's unleash clears MOVE_RESULT_SUPER_EFFECTIVE and
-    // NOT_VERY_EFFECTIVE after typecalc (data/battle_scripts_1.s:3300), so a
-    // landed unleash always scores as a plain hit. Phase D F21: so do six more
-    // scripts (EFFECTIVENESS_CLEARED_EFFECTS) -- Seismic Toss scored +2 into a
-    // Normal type where the ROM gives +1. A x0 still scores -2: the bicbyte
-    // leaves MOVE_RESULT_DOESNT_AFFECT_FOE.
-    // (F27: Counter / Mirror Coat run typecalc2, which never writes SE / NVE
-    // either -- src/battle_script_commands.c:4500-4591.)
-    const flagsCleared = bideUnleash !== null || EFFECTIVENESS_CLEARED_EFFECTS.has(moveData.effect)
-      || moveData.effect === "EFFECT_COUNTER" || moveData.effect === "EFFECT_MIRROR_COAT";
-    s[skillKey] += skillDelta(classifyOutcome(hit, flagsCleared && eff > 0 ? 1 : eff));
     // (EFFECT_EXPLOSION's self-faint is applied unconditionally much earlier
     // now — see the comment above the blockedByProtect check — since it must
     // fire even when Protect blocks the move entirely, which returns before
@@ -9049,7 +8789,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // nothing happens -- on the branches that would have missed, too. The
     // earlier checks (Substitute, already asleep) and the later ones fail -2
     // either way, which the paths below already give.
-    s[skillKey] += skillDelta("landed");
   } else if (!hit) {
     // A genuine accuracy miss on a power=0 status move (e.g. Attract, whose
     // 100 base accuracy CAN miss once evasion/accuracy stages are involved
@@ -9059,26 +8798,12 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // below UNCONDITIONALLY, regardless of hit, which would have run e.g.
     // Attract's infatuation-infliction logic even on a miss. Scored as a
     // real miss, no executor call, no state changes.
-    s[skillKey] += skillDelta("miss");
   } else {
     const executor = EFFECT_EXECUTORS[moveData.effect];
-    let outcome = "landed";
-    // Phase D F36: an executor that lands but prints a DeductSkillPoints
-    // string returns { printed: [...] } (Tickle into Hyper Cutter).
-    let printed = [];
     if (executor) {
-      // Status-move executors can report "failed" (e.g. Rest at full HP,
-      // Roar with nothing to switch into, paralysis blocked by type/ability)
-      // — those score Skill as noEffect instead of the default landed/+1.
-      const result = executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer);
-      if (result === "failed") outcome = "noEffect";
-      // B2b batch 9: "missed" is a THIRD outcome an executor can report, and
-      // the distinction is real in the Arena's Skill scoring. Cmd_stockpile at
-      // three sets MOVE_RESULT_MISSED (src/battle_script_commands.c:6854),
-      // not MOVE_RESULT_FAILED -- a miss, which BattleArena_AddSkillPoints
-      // scores differently from a failure.
-      else if (result === "missed") outcome = "miss";
-      else if (result && typeof result === "object") printed = result.printed ?? [];
+      // An executor's return value ("failed" / "missed" / { printed }) fed only
+      // the Arena's Skill scoring; the Palace fork does not read it.
+      executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer);
     } else {
       // A3: the EFFECT_TOXIC exemption that used to live on this branch is GONE.
       // It let Toxic land, score +1 Skill and apply nothing whenever the target
@@ -9111,7 +8836,6 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       // 5 cells of 1392, all four queued for B3.
       throw new Error(`"${moveName}" (effect: ${moveData.effect}) has no execution logic yet — port it into EFFECT_EXECUTORS.`);
     }
-    s[skillKey] += printed.length ? arenaSkillDelta("landed", printed) : skillDelta(outcome);
   }
 }
 
@@ -10865,23 +10589,11 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order) {
       if (so.confTick) applyConfusionTick(s2, order[1], so.confTick);
       // A bounced move is applied with the BOUNCER as the actor -- which in this
       // engine is exactly "it landed on the original user", since every executor
-      // targets the actor's foe. The judging then has to be put back where it
-      // belongs: the move was still USED by the second actor, so its Mind and
-      // Skill deltas are transferred below rather than credited to the bouncer.
+      // targets the actor's foe.
       const applyAs = bounced ? order[0] : order[1];
-      const judgeBefore = bounced
-        ? { mindYou: s2.mindYou, mindOpp: s2.mindOpp, skillYou: s2.skillYou, skillOpp: s2.skillOpp }
-        : null;
       const bidePre2 = (s2.youLock?.kind === "bide" || s2.oppLock?.kind === "bide") ? bideSnapshot(s2) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
       applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null);
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
-      if (bounced) {
-        // Move the judging back onto the mon that actually chose the move.
-        const dMind = order[0] === "you" ? s2.mindYou - judgeBefore.mindYou : s2.mindOpp - judgeBefore.mindOpp;
-        const dSkill = order[0] === "you" ? s2.skillYou - judgeBefore.skillYou : s2.skillOpp - judgeBefore.skillOpp;
-        if (order[0] === "you") { s2.mindYou -= dMind; s2.skillYou -= dSkill; s2.mindOpp += dMind; s2.skillOpp += dSkill; }
-        else { s2.mindOpp -= dMind; s2.skillOpp -= dSkill; s2.mindYou += dMind; s2.skillYou += dSkill; }
-      }
       const secondLabel = ctx.noLabels ? "" : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
       // B8c: Shed Skin's 1/3 is drawn HERE, before the end-of-turn effects,
       // because it acts at their ABILITIES checkpoint -- ahead of the residuals.
@@ -11109,311 +10821,14 @@ function advanceTurn(s) {
   if (s.oppRecharge) s.oppRecharge = s.oppRecharge.timer > 1 ? { ...s.oppRecharge, timer: s.oppRecharge.timer - 1 } : null;
 }
 
-function evaluateTerminal(state) {
-  if (state.yourHpPct <= 0 && state.oppHpPct <= 0) return 0.5;
-  if (state.yourHpPct <= 0) return 0;
-  if (state.oppHpPct <= 0) return 1;
-
-  const mindWin = state.mindYou > state.mindOpp ? 2 : state.mindYou < state.mindOpp ? 0 : 1;
-  const skillWin = state.skillYou > state.skillOpp ? 2 : state.skillYou < state.skillOpp ? 0 : 1;
-  // Body is judged on TRUNCATED INTEGER percentages RELATIVE TO EACH SIDE'S
-  // OWN ROUND-START HP in source, not raw floats and not relative to max HP:
-  // ShowJudgmentSprite's ARENA_CATEGORY_BODY branch (src/battle_arena.c:
-  // 530-533) computes `(gBattleMons[battler].hp * 100) / hpAtStart[battler]`
-  // as C integer division (hp/hpAtStart are both u16 -> promoted to int),
-  // truncating toward zero BEFORE the two sides are ever compared
-  // (battle_arena.c:536-557). hpAtStart is HP at SWITCH-IN for this specific
-  // 1v1 (BattleArena_InitPoints, battle_arena.c:569-581), NOT max HP — see
-  // the long comment on buildStartState's yourHpPctAtStart/oppHpPctAtStart
-  // parameters for the full trace (both InitPoints call sites, why it's
-  // never re-baselined mid-round, and the known UI gap). A mon that starts a
-  // round below max HP and heals during it can legitimately push this ratio
-  // ABOVE 100 — capping at 100 (as this engine's yourHpPct/oppHpPct tracking
-  // correctly does for "% of max HP" purposes elsewhere) would UNDER-state
-  // that recovery relative to what pokeemerald actually judges. So the ratio
-  // is computed HERE, at judgment time only — yourHpPct/oppHpPct themselves
-  // stay exactly as tracked (% of max HP, still capped at 100 by their own
-  // write sites) for every other purpose (damage calc, Flail/Reversal power,
-  // etc.), and only this comparison rescales.
-  //
-  // Math.floor here is deliberately NOT Math.trunc and NOT removable as
-  // "redundant": it's only equivalent to trunc-toward-zero because both
-  // ratios are non-negative (guaranteed by the <= 0 early returns above,
-  // which route fainted-side cases to a win/loss/draw before bodyWin is ever
-  // computed, and by yourHpPctAtStart/oppHpPctAtStart never being 0 in any
-  // reachable state) — do not simplify this away.
-  // A8: source compares INTEGER HP -- (hp * 100) / hpAtStart in C integer
-  // division (src/battle_arena.c:531-532). This engine carries HP as a float
-  // percentage of max HP, and the percentage always encodes an exact integer HP
-  // (every delta is an integer amount converted to a percentage; measured max
-  // representation error 8.5e-14 over 1,075,339 leaves). But the DIVISION is
-  // not exact: 88/176 comes out as 49.99999999999999, and Math.floor turns a
-  // Body of 50 into 49. sim-audit.md §3.3 measured 4,262 such wrong Body
-  // numbers across 2,150,678 computations -- collapsing to 3 flipped Body
-  // categories and 0 flipped match verdicts, so the defect was real and its
-  // measured impact was zero. Fixed anyway: it stays harmless only until an
-  // exhaustive enumeration reaches the position where it is not.
-  //
-  // Rounding to 1e-9 before flooring removes the ULP noise without changing any
-  // genuine value -- the true ratios are integers divided by integers well
-  // inside that tolerance.
-  const bodyPct = (hp, atStart) => Math.floor(Math.round((hp / atStart) * 100 * 1e9) / 1e9);
-  const yourBody = bodyPct(state.yourHpPct, state.yourHpPctAtStart);
-  const oppBody = bodyPct(state.oppHpPct, state.oppHpPctAtStart);
-  const bodyWin = yourBody > oppBody ? 2 : yourBody < oppBody ? 0 : 1;
-  const total = mindWin + skillWin + bodyWin;
-  if (total > 3) return 1;
-  if (total < 3) return 0;
-  return 0.5;
-}
-
-// Secondary sort key for search()'s move ranking, used ONLY to break ties
-// (see below) — never to override a genuine winProb difference. Estimates
-// how much raw damage "you" would deal RIGHT NOW with this move, using the
-// actual current stages/weather/status, the same calcDamage function used
-// everywhere else. Status moves (power=0, e.g. Destiny Bond/Calm Mind) score
-// 0 here — correct for tie-breaking purposes, since among moves that are
-// ALL win-guaranteed (or all loss-guaranteed), an attacking move is always
-// at least as informative a recommendation as a non-damaging one.
-function moveTiebreakScore(ctx, state, moveName) {
-  const moveData = battleMoveData(ctx.you, moveName);
-  if (moveData.power === 0) return 0;
-  const atkStatKey = moveData.category === "physical" ? "atk" : "spa";
-  const defStatKey = moveData.category === "physical" ? "def" : "spd";
-  const screenActive = moveData.category === "physical" ? state.oppReflectTurns != null : state.oppLightScreenTurns != null;
-  const opts = {
-    atkStage: state.youStages[atkStatKey], defStage: state.oppStages[defStatKey],
-    attackerBurned: state.youStatus === "burn",
-    attackerFlashFireActive: state.youFlashFireActive,
-    attackerHpPct: state.yourHpPct,
-    screenActive,
-    weather: effectiveWeather(state, ctx.you, ctx.opp),
-    defenderForesighted: state.oppForesighted,
-    attackerStatus: state.youStatus, defenderStatus: state.oppStatus,
-  };
-  // C2 (found by the full grid): a move whose power is an ENUMERATED draw
-  // (Magnitude, Present, Psywave) or a counter the action derives (Fury
-  // Cutter, Rollout, Triple Kick) cannot be priced without one. This is only a
-  // tie-break between equal P(win)s, so it takes the draws' expected damage
-  // (Present's heal arm counting 0) and the counter moves' first-hit power --
-  // deterministic, and nothing here reaches a P(win). Reachable once the
-  // player holds such a move, e.g. through Mimic.
-  const draws = VARIABLE_DAMAGE_DRAWS[moveData.effect];
-  if (draws) {
-    return draws.reduce((a, d) => a + (d.power === "heal" ? 0 : d.p * calcDamage(ctx.you, ctx.opp, moveName, { ...opts, variablePower: d.power })), 0);
-  }
-  if (COUNTER_POWER_EFFECTS.has(moveData.effect)) return calcDamage(ctx.you, ctx.opp, moveName, { ...opts, variablePower: moveData.power });
-  // Bide deals twice what it stored, and has stored nothing unless it is biding.
-  if (moveData.effect === "EFFECT_BIDE") return state.youLock?.kind === "bide" ? 2 * state.youLock.dmg : 0;
-  return calcDamage(ctx.you, ctx.opp, moveName, opts);
-}
-
-// C1 (amendment 13): `retain` = false is the HEADLESS mode. The search is the
-// same expectimax, in the same order, with the same sort and tie-break -- so the
-// winProb and the move are bit-identical -- but no node keeps its branches,
-// their states or their subtrees. A retained tree for a heavy cell held
-// gigabytes (Gengar vs Hariyama 2: 2.8 GB after the call, B4b); headless, the
-// live set is one root-to-leaf path of transient resolveTurn arrays. Batch
-// tools use it; the site and team-workflow, which read the tree, keep the
-// default.
-// B6 step 1 (amendment 14): the TRANSPOSITION TABLE. search(ctx, state, turns)
-// is a pure function of the state -- the AI's choice, the player's options and
-// every roll read nothing else -- so a state reached by two different paths has
-// one value, computed once. `tt` is a Map scoped to one analyzeMatchup call.
-// Headless it stores the result; RETAINED (B6-2) it stores the node itself,
-// so a position reached by two paths is ONE shared subtree -- the tree becomes
-// a DAG, which every reader (printTree, team-workflow's leaf walk) already
-// handles, since each multiplies by its own branch probability. B6-2's crits
-// roughly doubled retained trees and pushed the heaviest past the default heap;
-// sharing brings them back. Terminal nodes are not stored: evaluateTerminal is
-// cheaper than a key.
-//
-// The key is the state with its turn-scoped fields dropped: the damage-taken
-// records, Endure, Protect, Destiny Bond and Magic Coat's bounce are reset by
-// resolveTurnWithOrder before anything reads them (freshTurnDamageTracking),
-// and nothing between here and there -- move selection, the AI, turn order --
-// reads them. Two states differing only in those are the same position.
-function ttKey(turnsRemaining, state) {
-  const { youDamageTaken, oppDamageTaken, youEndureActive, oppEndureActive, youProtected, oppProtected,
-    youDestinyBondActive, oppDestinyBondActive, youBouncing, oppBouncing, ...rest } = state;
-  return turnsRemaining + "|" + JSON.stringify(rest);
-}
-function search(ctx, state, turnsRemaining, retain = true, tt = null, prune = false) {
-  if (turnsRemaining === 0 || state.yourHpPct <= 0 || state.oppHpPct <= 0) {
-    const winProb = evaluateTerminal(state);
-    return retain ? { winProb, move: null, isTerminal: true, state } : { winProb, move: null, isTerminal: true };
-  }
-  let key = null;
-  if (tt) {
-    key = ttKey(turnsRemaining, state);
-    const hit = tt.get(key);
-    if (hit) return hit;
-  }
-
-  // A charging mon (mid-Dive/Fly/Dig) has no real choice — the game forces
-  // the same move again automatically (source-confirmed, no action menu).
-  // B3 batch 1: so does a RECHARGING one, through the same branch of source
-  // (STATUS2_MULTIPLETURNS || STATUS2_RECHARGE, src/battle_main.c:4160-4165 and
-  // src/battle_util.c:107-110). The AI is not consulted and the player has no
-  // menu; without this the recharge turn's Mind score followed whatever move
-  // the search or the AI happened to pick.
-  // B3 batch 3: and so does a mon locked into Rampage or Rollout
-  // (STATUS2_MULTIPLETURNS, the same branch again).
-  const oppForced = state.oppCharging ? state.oppCharging.move : (state.oppRecharge?.move || state.oppLock?.move);
-  const youForced = state.youCharging ? state.youCharging.move : (state.youRecharge?.move || state.youLock?.move);
-  // F14: the opponent's choice per Quick Claw outcome (aiTurnPlans). A forced
-  // move asks no AI, so its turn marginalises the draw in resolveTurn.
-  // F2c: the AI's decision records the player's last move into its history.
-  state = aiDecisionState(state);
-  const plans = oppForced
-    ? [{ p: 1, qc: undefined, cands: [{ move: oppForced, prob: 1 }] }]
-    : aiTurnPlans(effectiveCtx(ctx, state), state);
-  const yourMoveChoices = youForced ? [youForced]
-    : (() => { const ec = effectiveCtx(ctx, state); return selectableMoves(ec.you.moves, state, "you", ec.opp, "you"); })();
-
-  // C2: PRUNING (opt-in, headless only). P(win) is at most 1, so while an
-  // option's expectation is being summed, `expected + (1 - weight seen)` bounds
-  // it from above; once that bound is below the best option found by more than
-  // the tie epsilon, the option can neither win nor tie and its remaining
-  // branches are skipped. The winning option is always evaluated in full, so
-  // the returned winProb and move are unchanged (the pick below is independent
-  // of evaluation order); only the LOSING options' values become bounds.
-  // Pruning is strongest when the best option comes first, so the player's
-  // moves are tried in descending estimated damage.
-  const options = [];
-  let best = -Infinity;
-  const tryOrder = prune && yourMoveChoices.length > 1
-    ? yourMoveChoices.map((m) => [m, moveTiebreakScore(ctx, state, m)]).sort((x, y) => y[1] - x[1]).map((x) => x[0])
-    : yourMoveChoices;
-  for (const yourMove of tryOrder) {
-    let expected = 0;
-    let seen = 0;
-    let cut = false;
-    const branches = [];
-    for (const { move: oppMove, prob: oppProb, planP, qc } of plans.flatMap((pl) => pl.cands.map((c) => ({ ...c, planP: pl.p, qc: pl.qc })))) {
-      const raw = resolveTurn(ctx, state, yourMove, oppMove, { qc });
-      for (const b of raw) {
-        const weight = b.p * oppProb * planP;
-        const sub = search(ctx, b.state, turnsRemaining - 1, retain, tt, prune);
-        expected += weight * sub.winProb;
-        seen += weight;
-        if (retain) branches.push({ prob: weight, label: b.label, state: b.state, subtree: sub });
-        if (prune && expected + Math.max(0, 1 - seen) + 1e-9 < best - 1e-6) { cut = true; break; }
-      }
-      if (cut) break;
-    }
-    if (cut) { options.push({ move: yourMove, winProb: expected + Math.max(0, 1 - seen), pruned: true }); continue; }
-    if (expected > best) best = expected;
-    if (retain) {
-      branches.sort((a, b) => b.prob - a.prob);
-      options.push({ move: yourMove, winProb: expected, branches });
-    } else {
-      options.push({ move: yourMove, winProb: expected });
-    }
-  }
-  // Primary key: winProb (descending) — the real decision criterion, never
-  // overridden. Secondary key (ONLY within floating-point-noise distance,
-  // e.g. two branches of a guaranteed win/loss that differ by ~1e-16 from
-  // summation order): raw current damage, descending. Without this, a
-  // stable sort on exactly-tied winProbs falls back to whatever order the
-  // mon's moves happen to be listed in, which can surface a 0-damage
-  // immune-type move as "the" recommendation purely by coincidence — a real
-  // coaching-quality bug, not a scoring bug (the winProb itself was correct;
-  // it's genuinely a guaranteed win/loss regardless of move, but the tool
-  // must still recommend something sensible rather than something arbitrary).
-  const WINPROB_TIE_EPSILON = 1e-6;
-  // The pick, as a well-defined rule (C2): the maximum P(win) among the
-  // options evaluated in full; every option within WINPROB_TIE_EPSILON of it is
-  // tied, and a tie goes to the higher damage estimate, then the earlier move
-  // in selection order. The in-place sort this replaces used the same keys, but
-  // an epsilon comparator is not transitive, so its answer could depend on the
-  // input order -- which pruning and move ordering change. Pruned options never
-  // take part; the rest follow the pick by P(win).
-  const full = options.filter((o) => !o.pruned);
-  const maxV = Math.max(...full.map((o) => o.winProb));
-  const idx = (m) => yourMoveChoices.indexOf(m);
-  const pick = full.filter((o) => o.winProb >= maxV - WINPROB_TIE_EPSILON)
-    .sort((a, b) => (moveTiebreakScore(ctx, state, b.move) - moveTiebreakScore(ctx, state, a.move)) || (idx(a.move) - idx(b.move)))[0];
-  options.sort((a, b) => (a === pick ? -1 : b === pick ? 1 : (b.winProb - a.winProb) || (idx(a.move) - idx(b.move))));
-
-  if (!retain) {
-    const res = { move: options[0].move, winProb: options[0].winProb, isTerminal: false, allOptions: options };
-    if (tt) tt.set(key, res);
-    return res;
-  }
-  const node = {
-    move: options[0].move,
-    winProb: options[0].winProb,
-    isTerminal: false,
-    allOptions: options,
-    branches: options[0].branches,
-  };
-  if (tt) tt.set(key, node);
-  return node;
-}
-
-function printTree(node, indent = "", turnLabel = "Turn", minProb = 0.02) {
-  if (node.isTerminal) {
-    const s = node.state;
-    console.log(`${indent}[end] you ${s.yourHpPct.toFixed(1)}% / opp ${s.oppHpPct.toFixed(1)}% ` +
-      `| Mind ${s.mindYou}-${s.mindOpp} | Skill ${s.skillYou}-${s.skillOpp} ` +
-      `| P(win)=${node.winProb.toFixed(2)}`);
-    return;
-  }
-  console.log(`${indent}${turnLabel}: play ${node.move}  [P(win)=${node.winProb.toFixed(3)}]`);
-  for (const branch of node.branches) {
-    if (branch.prob < minProb) continue;
-    console.log(`${indent}  ├─ (${(branch.prob * 100).toFixed(0)}%) ${branch.label}`);
-    printTree(branch.subtree, indent + "  │    ", "then", minProb);
-  }
-}
-
-// Public entry point: run a full 1v1 analysis given two mon configs and
-// starting HP percentages. This is what a UI / another module would call.
-// yourUsablePartyMons: a PER-MATCHUP INPUT, not a fixed constant — exactly
-// like yourHpPct/oppHpPct above. It's how many of the player's OTHER 2 team
-// slots are still alive going into THIS SPECIFIC matchup. Defaults to 2
-// because a standalone analyzeMatchup() call has no run context and "fresh
-// team, nothing fainted yet" is the only sane default — but a real 3-matchup
-// Arena run must pass 2 for the first matchup, then 1 or 0 for later ones as
-// earlier reserves faint (mirroring how yourHpPct carries a mon's damage
-// forward). The team-workflow builder (HANDOFF §7 step 5) MUST decrement
-// this across chained matchups, or every matchup after the first will silently
-// score Roar/phazing moves as if the team were still fully healthy. Feeds
-// EFFECT_ROAR's scoring (see chooseOpponentMoves) — the AI sees this real
-// count, Arena-blind (see the source citation on AI_HANDLERS.EFFECT_ROAR).
-// oppUsablePartyMons: the SAME per-matchup concept, mirrored for the
-// opponent's own reserves — feeds AI_CBM_BatonPass's count_usable_party_mons
-// (AI_USER) check. Defaults to 2 for the same reason; we don't currently
-// model the opponent's full 3-mon Frontier roster (only the one named set
-// being analyzed), so this is a simplifying assumption until that's tracked.
-// C1: `tree: false` runs the search headless (see search) -- the result
-// carries move, winProb and allOptions[{move, winProb}], and no branches.
-// Phase D F11: a Frontier trainer's mon is built as FillTrainerParty builds it
-// (src/battle_tower.c:1739-1748): friendship MAX_FRIENDSHIP (255), but 0 if the
-// set carries Frustration. This used to force 255 on every opponent, so an
-// opponent's Frustration hit at power 0 in every solved cell.
 function buildFrontierOpponent(oppConfig) {
   return buildMon({ ...oppConfig, friendship: (oppConfig.moves ?? []).includes("Frustration") ? 0 : 255 });
-}
-
-function analyzeMatchup(youConfig, oppConfig, { yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = yourHpPct, oppHpPctAtStart = oppHpPct, yourUsablePartyMons = 2, oppUsablePartyMons = 2, tree = true, transposition = true, prune = false } = {}) {
-  const you = buildMon(youConfig);
-  const opp = buildFrontierOpponent(oppConfig);
-  // C2: headless, nothing reads a branch's label, so none are built.
-  const ctx = tree ? { you, opp } : { you, opp, noLabels: true };
-  const state = buildStartState({ yourHpPct, oppHpPct, yourHpPctAtStart, oppHpPctAtStart, yourUsablePartyMons, oppUsablePartyMons, you, opp });
-  // `transposition: false` exists for MEASUREMENT only (test-c1-headless's
-  // memory control); every caller uses the default.
-  const result = search(ctx, state, 3, tree, transposition ? new Map() : null, prune && !tree);
-  return { you, opp, result };
 }
 
 export {
   buildMon, calcDamage, calcConfusionDamage, typeEffectiveness,
   // amendment 16: the site's Hidden Power type picker lists exactly these
   HIDDEN_POWER_TYPES,
-  // Phase D: the differential harness asks the AI exactly as search() does
   effectiveCtx,
   // B7a: surfaced so the test can pin the stage arithmetic to source's integer
   // form directly, instead of inferring it through damage.
@@ -11439,10 +10854,10 @@ export {
   // A2: the AI damage-roll enumeration, surfaced so tests and solver tools can
   // assert on the roll classes directly instead of re-deriving them.
   enumerateAiRollOutcomes, AI_SIM_ROLLS, buildAiDamageState,
-  buildStartState, resolveTurn, search, printTree,
+  buildStartState, resolveTurn,
   // B3 batch 7a: the volFlags accessor, for tests that inspect a folded flag.
   vf, VF,
-  analyzeMatchup, MOVES, AI_HANDLERS, evaluateTerminal,
+  MOVES, AI_HANDLERS,
   // Phase D F11: the opponent as the ROM builds it (friendship by Frustration).
   buildFrontierOpponent,
   // the site's Attract-pair gate reads the engine's own gender rule
@@ -11450,19 +10865,7 @@ export {
   // Change #11 guard tables — exported so the coverage test pins them to the
   // live pool rather than duplicating them.
   HANDLED_EFFECTS, ACCEPTED_UNMODELED_EFFECTS,
-  // Arena-judge scoring primitives — surfaced (pure functions, no logic
-  // change) so the DRIVE-model scorekeeper (scorekeeper.js) can bank a
-  // reported turn's Mind/Skill by calling the ENGINE'S OWN scoring, never a
-  // reimplementation. applyMove is exported for the equivalence test's
-  // ground-truth branch deltas (it is the sole Mind/Skill banker resolveTurn
-  // uses — see logic.js:4068/4086; end-of-turn effects never touch score).
-  mindDelta, skillDelta, classifyOutcome, resolveAbilityInteraction, applyMove,
-  // A10: surfaced so scorekeeper.js derives a two-turn move's invulnerability
-  // bit from the same table the engine does, instead of hard-coding one.
-  SEMI_INVULN_BIT,
-  // A7: the two Arena Skill mechanisms, surfaced so tests assert on the source
-  // structure rather than on hand-netted constants.
-  arenaSkillDelta, ARENA_DEDUCT_STRINGS, ARENA_ADD_SKILL, ABILITY_BLOCK_SOURCE, ABILITY_BLOCK_SKILL_DELTA,
+  resolveAbilityInteraction, applyMove, SEMI_INVULN_BIT,
   // B7: the hold-effect classification, surfaced so the test can assert that
   // every battle hold effect in the ROM sits in exactly one bucket.
   HOLD_EFFECT_DISPOSITION,
