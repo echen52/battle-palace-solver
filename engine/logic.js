@@ -52,6 +52,7 @@ export const ARENA_COMPAT = {
   encoreDraw: false,    // Encore's timer: 3..6 drawn, not a fixed 3
   yawnDraw: false,      // Yawn's sleep: 2..5 drawn, not a fixed 2
   perish: false,        // Perish Song counts down and faints
+  eotAfterKO: false,    // the turn's end-of-turn effects still run after a knockout
   spite: false,         // Spite removes PP
   grudge: false,        // Grudge empties the KO move's PP
   pp: false,            // PP is spent
@@ -9446,7 +9447,7 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null, yawnSleep = null) {
     s.youYawnTurns--;
     if (s.youYawnTurns <= 0) {
       s.youYawnTurns = null;
-      if (s.youStatus == null && you.ability !== "Insomnia" && you.ability !== "Vital Spirit" && !uproarKeepsAwake(s, you)) {
+      if (s.yourHpPct > 0 && s.youStatus == null && you.ability !== "Insomnia" && you.ability !== "Vital Spirit" && !uproarKeepsAwake(s, you)) {
         s.youStatus = "sleep";
         s.youSleepTurns = yawnSleepTurns(yawnSleep, "you"); // PALACE FORK: the 2-5 draw
         cancelMultiTurnMoves(s, "you"); // ENDTURN_YAWN calls it explicitly (src/battle_util.c:1761) -- not via SetMoveEffect, as batch 2's note said
@@ -9457,7 +9458,7 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null, yawnSleep = null) {
     s.oppYawnTurns--;
     if (s.oppYawnTurns <= 0) {
       s.oppYawnTurns = null;
-      if (s.oppStatus == null && opp.ability !== "Insomnia" && opp.ability !== "Vital Spirit" && !uproarKeepsAwake(s, opp)) {
+      if (s.oppHpPct > 0 && s.oppStatus == null && opp.ability !== "Insomnia" && opp.ability !== "Vital Spirit" && !uproarKeepsAwake(s, opp)) {
         s.oppStatus = "sleep";
         s.oppSleepTurns = yawnSleepTurns(yawnSleep, "opp"); // PALACE FORK: the 2-5 draw
         cancelMultiTurnMoves(s, "opp"); // ENDTURN_YAWN calls it explicitly (src/battle_util.c:1761) -- not via SetMoveEffect, as batch 2's note said
@@ -9479,6 +9480,7 @@ function yawnDraws(s) {
   let out = [{ p: 1, you: null, opp: null }];
   for (const side of ["you", "opp"]) {
     if (s[side + "YawnTurns"] !== 1) continue; // completes at this end-of-turn
+    if (s[side === "you" ? "yourHpPct" : "oppHpPct"] <= 0) continue; // a fainted mon falls asleep for nothing
     out = out.flatMap((b) => [2, 3, 4, 5].map((d) => ({ ...b, p: b.p * 0.25, [side]: d })));
   }
   return out;
@@ -10943,9 +10945,16 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
     const firstActorHp = order[0] === "you" ? s.yourHpPct : s.oppHpPct;
     const secondActorHp = order[0] === "you" ? s.oppHpPct : s.yourHpPct;
     if (firstActorHp <= 0 || secondActorHp <= 0) {
-      snapHp(ctx, s);
-      advanceTurn(s);
-      results.push({ p: fo.p, state: s, label: `${firstLabel} (opp never acts — KO)` });
+      if (ARENA_COMPAT.eotAfterKO) {
+        snapHp(ctx, s);
+        advanceTurn(s);
+        results.push({ p: fo.p, state: s, label: `${firstLabel} (opp never acts — KO)` });
+      } else {
+        // PALACE FORK: the knocked-out side never acts; the turn still ends.
+        snapHp(ctx, s);
+        const ctxK = resolutionChanged(state, s) ? reResolve(ctx, s) : ctx;
+        endOfTurnTail(ctx, ctxK, s, fo.p, `${firstLabel} (${order[1]} never acts — KO)`, results);
+      }
       continue;
     }
 
@@ -10987,31 +10996,44 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
         : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
-      // B8c: Shed Skin's 1/3 is drawn HERE, before the end-of-turn effects,
-      // because it acts at their ABILITIES checkpoint -- ahead of the residuals.
-      const bothUp = s2.yourHpPct > 0 && s2.oppHpPct > 0;
       const ctx3 = resolutionChanged(s, s2) ? reResolve(ctx2, s2) : ctx2; // B8d: and the end of turn sees both actions' changes
-      const eot = bothUp ? shedSkinBranches(ctx3, s2) : NO_SHED_SKIN;
-      const yawns = bothUp ? yawnDraws(s2) : [{ p: 1, you: null, opp: null }];
-      for (const eb0 of eot) for (const yd of yawns) {
-        const eb = yawns.length > 1 ? { ...eb0, p: eb0.p * yd.p } : eb0;
-        const s3 = eot.length > 1 || yawns.length > 1 ? cloneState(s2) : s2;
-        if (bothUp) applyEndOfTurnEffects(ctx3, s3, eb.cure, yd);
-        // B3 batch 5b: Future Sight releases AFTER the end-of-turn effects
-        // (HandleWishPerishSongOnTurnEnd, case 0) and BEFORE the Arena judges
-        // (case 2 of the same function) -- so a turn-1 Future Sight lands before
-        // turn 3 is judged. Its accuracy roll and Focus Band are real branches.
-        for (const fb of futureSightRelease(ctx3, s3)) {
-          perishSongTick(fb.state); // PALACE FORK: after Future Sight
-          snapHp(ctx, fb.state); // end-of-turn residuals and Future Sight
-          advanceTurn(fb.state);
-          results.push({ p: fo.p * so.p * eb.p * fb.p, state: fb.state, label: `${firstLabel}; ${secondLabel}${eb.label ?? ""}${fb.label}` });
-        }
-      }
+      endOfTurnTail(ctx, ctx3, s2, fo.p * so.p, `${firstLabel}; ${secondLabel}`, results);
     }
   }
 
   return results;
+}
+
+// The end of a turn, shared by every path through resolveTurnWithOrder.
+// B8c: Shed Skin's 1/3 is drawn first, because it acts at the ABILITIES
+// checkpoint -- ahead of the residuals; Yawn's sleep draw goes with it
+// (PALACE FORK). Then the end-of-turn effects, then (B3 batch 5b) Future Sight
+// (HandleWishPerishSongOnTurnEnd case 0), then (PALACE FORK) Perish Song
+// (case 1), then the HP snap and the turn advance.
+// PALACE FORK: the effects run whenever EITHER mon is still standing.
+// BattleTurnPassed (src/battle_main.c:3956-3970) runs DoFieldEndTurnEffects and
+// DoBattlerEndTurnEffects before HandleFaintedMonActions, whatever fainted this
+// turn; each per-battler effect skips a battler at 0 HP. The Arena engine ran
+// them only with both standing, since a knockout ended its match; a Palace KO
+// does not end the battle, and the survivor's residuals (burn, poison, weather,
+// Leftovers) are part of what it carries forward.
+function endOfTurnTail(ctx, ctxEot, s2, pBase, label, results) {
+  const bothUp = s2.yourHpPct > 0 && s2.oppHpPct > 0;
+  const anyUp = s2.yourHpPct > 0 || s2.oppHpPct > 0;
+  const runEot = ARENA_COMPAT.eotAfterKO ? bothUp : anyUp;
+  const eot = runEot ? shedSkinBranches(ctxEot, s2) : NO_SHED_SKIN;
+  const yawns = runEot ? yawnDraws(s2) : [{ p: 1, you: null, opp: null }];
+  for (const eb0 of eot) for (const yd of yawns) {
+    const eb = yawns.length > 1 ? { ...eb0, p: eb0.p * yd.p } : eb0;
+    const s3 = eot.length > 1 || yawns.length > 1 ? cloneState(s2) : s2;
+    if (runEot) applyEndOfTurnEffects(ctxEot, s3, eb.cure, yd);
+    for (const fb of futureSightRelease(ctxEot, s3)) {
+      perishSongTick(fb.state); // PALACE FORK: after Future Sight
+      snapHp(ctx, fb.state); // end-of-turn residuals and Future Sight
+      advanceTurn(fb.state);
+      results.push({ p: pBase * eb.p * fb.p, state: fb.state, label: `${label}${eb.label ?? ""}${fb.label}` });
+    }
+  }
 }
 
 // B3 batch 4d: ENDTURN_UPROAR for one side whose lock is an Uproar.
