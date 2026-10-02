@@ -24,7 +24,8 @@ export const STRIP_KEYS = new Set(["mindYou", "mindOpp", "skillYou", "skillOpp",
   // Fields the fork ADDS. The Arena engine has no such state; its absence there
   // is not a difference.
   "oppAbilityRecord", "oppMoveHistory", "youLastResultingMove", "oppLastResultingMove",
-  "youPP", "oppPP", "youPartyPP", "oppPartyPP", "youGrudge", "oppGrudge", "youPerishCount", "oppPerishCount"]);
+  "youPP", "oppPP", "youPartyPP", "oppPartyPP", "youGrudge", "oppGrudge", "youPerishCount", "oppPerishCount",
+  "youDraggedOut", "oppDraggedOut"]);
 // The fork records MOVE_UNAVAILABLE into the AI's move history where the Arena
 // engine recorded nothing (slot occupancy). Dropped here; the AI probes still
 // compare every decision made from those histories.

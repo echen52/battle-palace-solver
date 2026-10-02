@@ -39,6 +39,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-mirror | involution + battle symmetry on 1,859 corpus positions (detector caught a planted one-sided Leftovers skip) |
 | test-palace | groups 354/354 vs battle_moves.h parsed directly; nature rows vs source comments; fallback + vanilla bug; loafs; limits; latch; history; 602 corpus positions |
 | test-engine-fixes | Protect reset, Destiny Bond timing (5/8 fail on the unfixed engine) |
+| test-team | 33: classification, carried vs left-behind fields, Toxic/sleep on return, Spikes 1/8 1/6 1/4, Intimidate / Sand Stream / Truant on entry, switch order, Pursuit x2, Roar 50/50 and its blocks, Baton Pass, faint/replace/lose, end of turn after a KO, Perish switch; 300+ random team turns sum to 1 |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -51,10 +52,15 @@ Workflow rule learned the hard way: **commit before any mutation check** —
   Transform/Mimic, and the Arena-horizon durations (Disable, Encore, Yawn,
   Perish Song) un-capped. Known edge left: a "no PP left" failure still lets a
   Choice item lock (needs Spite into a Choice holder).
-- **No party**: Roar/Whirlwind/Baton Pass always fail ("no reserve"), the
-  opponent's AI switching (ShouldSwitch is NOT disabled in the Palace —
-  src/battle_ai_switch_items.c:452 exempts only the Arena) and the player's own
-  switch option are outside the 1v1 engine.
+- Team layer (Phase B, engine/team.js): your 3-mon team vs one opponent mon,
+  the position is one state (youActive / youBench). Switching by choice (goes
+  first; the opponent's move, chosen vs the old mon, hits the newcomer; Pursuit
+  x2 on the leaver, even from a Palace loaf), after a faint (free, end of turn)
+  and by Roar/Whirlwind (random healthy teammate, mid-turn). Every state field
+  classified MON / SIDE / VOLATILE. Opponent leaving = "oppLeft" (your Roar,
+  its Baton Pass, its Perish Song at 0). NOT modelled: your own Baton Pass
+  (named throw), Assist (named throw), the opponent's other ShouldSwitch reasons
+  (they read its unknown team), Sleep Talk/Snore turns' sleep-counter desync.
 - Multi-hit contact moves into Static / Cute Charm / etc. throw by name (user
   decision 2026-09-30, kept); the player's AI now picks such moves too.
 - No emulator validation of the Palace layer yet (arena-solver/emu has the

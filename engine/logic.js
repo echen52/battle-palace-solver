@@ -5155,6 +5155,9 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     youGrudge: false, oppGrudge: false,
     // PALACE FORK: gDisableStructs.perishSongTimer (null = not perish-songed).
     youPerishCount: null, oppPerishCount: null,
+    // PALACE FORK: this turn, the battler was forced off the field (Roar /
+    // Whirlwind on it, or its own Baton Pass). The team layer acts on it.
+    youDraggedOut: false, oppDraggedOut: false,
     youLastMove: null, oppLastMove: null, // gLastMoves[battler] equivalent — set unconditionally whenever that actor acts (src/battle_script_commands.c:4407, gLastMoves[gBattlerAttacker] = gChosenMove), regardless of hit/prevented. Needed by e.g. AI_CV_DefenseUp/AI_CV_SpDefUp's "was I just hit by a physical/special move" check.
     // Substitute: null = no sub. A number = the sub's REMAINING HP pool
     // (starts at floor(maxHP/4), min 1 — src/battle_script_commands.c:7808-7833).
@@ -6580,7 +6583,17 @@ const EFFECT_EXECUTORS = {
     if (foeMon.types.includes("Grass")) return "failed";
     s[foeSeededKey] = true;
   },
-  EFFECT_BATON_PASS: () => "failed", // Arena has no reserve party to switch into (see AI_HANDLERS.EFFECT_BATON_PASS comment) — always a no-op, Skill scores noEffect, regardless of the AI's Tower-blind scoring.
+  // PALACE FORK: Baton Pass (data/battle_scripts_1.s, jumpifcantswitch): fails
+  // with no healthy teammate to switch to -- ctx.reserves, from the team layer;
+  // without it (the Arena engine's 1v1) it always fails, as it did there. The
+  // OPPONENT passing leaves the field (the solve ends: "opponent switched").
+  // YOUR mon passing opens your party screen mid-turn -- a decision this engine
+  // does not model yet, so it stops by name.
+  EFFECT_BATON_PASS: (s, actor, ctx) => {
+    if (!((ctx.reserves?.[actor] ?? 0) > 0)) return "failed";
+    if (actor === "you") throw new Error("Baton Pass by your mon: the mid-turn party choice is not modelled yet (palace-solver Phase B)");
+    s.oppDraggedOut = true;
+  },
   // Batch 5 — persistent-state effects (Substitute/Reflect/Light Screen).
   EFFECT_SUBSTITUTE: (s, actor, ctx) => {
     // data/battle_scripts_1.s:1090 jumpifstatus2 ... AlreadyHasSubstitute —
@@ -6803,7 +6816,23 @@ const EFFECT_EXECUTORS = {
     s[key] = 2;
   },
 
-  EFFECT_ROAR: () => "failed", // Arena has no reserve party to switch into (see AI_HANDLERS.EFFECT_ROAR comment for why the AI's SCORING doesn't know this) — always a no-op, Skill scores noEffect.
+  // PALACE FORK: Roar / Whirlwind (data/battle_scripts_1.s:593-602). Suction
+  // Cups and Ingrain block it first; accuracy is the caller's; then
+  // Cmd_forcerandomswitch (src/battle_script_commands.c): it fails with no
+  // other healthy party member (ctx.reserves, from the team layer -- without
+  // it, the Arena's 1v1, it always fails as before), and TryDoForceSwitchOut
+  // succeeds outright when the user's level is at least the target's. The
+  // target leaves at once; the team layer brings in a uniformly random healthy
+  // teammate (Random() % PARTY_SIZE, rejection-sampled).
+  EFFECT_ROAR: (s, actor, ctx) => {
+    const isYou = actor === "you";
+    const foe = isYou ? "opp" : "you";
+    const self = isYou ? ctx.you : ctx.opp, foeMon = isYou ? ctx.opp : ctx.you;
+    if (foeMon.ability === "Suction Cups" || s[foe + "Ingrained"]) return "failed";
+    if (!((ctx.reserves?.[foe] ?? 0) > 0)) return "failed";
+    if (self.level < foeMon.level) throw new Error(`Roar: a lower-level user (${self.level} < ${foeMon.level}) rolls TryDoForceSwitchOut's level check -- not modelled`);
+    s[foe + "DraggedOut"] = true;
+  },
   EFFECT_REST: (s, actor, ctx) => {
     // Cmd_trysetrest (src/battle_script_commands.c:6762-6784): fails outright
     // (failJump, no heal, no sleep) if already at full HP -- see below for the
@@ -7566,8 +7595,12 @@ function warnUnmodeledMechanicOnce(effect, moveName) {
 // Up x the stockpile (0 = nothing stored, and the move fails). Phase D F39: one
 // function, read by applyMove's damage AND by Focus Band's lethality probe, so
 // the probe cannot ask about a different hit than the one that lands.
-function scriptDamageMultiplier(state, actor, moveData) {
+function scriptDamageMultiplier(state, actor, moveData, ctx = null) {
   const isYou = actor === "you";
+  // PALACE FORK: Pursuit into a switch -- BattleScript_ActionSwitch sets
+  // sDMG_MULTIPLIER 2 before the hit on the outgoing mon
+  // (data/battle_scripts_1.s:3088-3101). The team layer passes ctx.pursuitSwitch.
+  if (moveData.effect === "EFFECT_PURSUIT" && ctx?.pursuitSwitch) return 2;
   if (moveData.effect === "EFFECT_SMELLINGSALT" && state[isYou ? "oppStatus" : "youStatus"] === "paralysis"
       && state[isYou ? "oppSubstituteHP" : "youSubstituteHP"] == null) return 2;
   if (moveData.effect === "EFFECT_FLINCH_MINIMIZE_HIT" && vf(state, isYou ? "oppMinimized" : "youMinimized")) return 2;
@@ -8537,7 +8570,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     // applies all three at the same point, to CalculateBaseDamage's output.
     // Phase D F39: derived by scriptDamageMultiplier, which Focus Band's probe
     // reads too. Read BEFORE the Spit Up block below spends the stockpile.
-    let spitUpMultiplier = scriptDamageMultiplier(s, actor, moveData);
+    let spitUpMultiplier = scriptDamageMultiplier(s, actor, moveData, ctx);
     if (moveData.effect === "EFFECT_SPIT_UP") {
       // NOTE the script ends in `adjustsetdamage`, not `adjustnormaldamage`
       // (data/battle_scripts_1.s:2094-2103), so Spit Up takes NO damage roll.
@@ -9201,7 +9234,8 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null, yawnSleep = null) {
   // before turn 1 (src/battle_main.c:3051, :3901, :4875-4876). So every turn end.
   for (const [side, mon, hpKey] of [["you", you, "yourHpPct"], ["opp", opp, "oppHpPct"]]) {
     const st = side === "you" ? s.youStages : s.oppStages;
-    if (mon.ability === "Speed Boost" && s[hpKey] > 0 && st.spe < 6) {
+    // PALACE FORK: not on the turn the mon switched in (isFirstTurn != 2, src/battle_util.c:2643)
+    if (mon.ability === "Speed Boost" && s[hpKey] > 0 && st.spe < 6 && s[side + "MonFirstTurn"] !== 2) {
       if (side === "you") s.youStages = { ...st, spe: st.spe + 1 }; else s.oppStages = { ...st, spe: st.spe + 1 };
       recordAbility(s, side, "Speed Boost"); // F2a: ENDTURN records on the holder
     }
@@ -10605,7 +10639,7 @@ function focusBandBranches(ctx, state, actor, moveName, moveData, results) {
       : counterHitPower(state, actor, moveData);
   // Phase D F39: the probe asks about the hit that lands -- its crit (single-hit
   // mask bit 0; multi-hit throws below) and the script's dmgMultiplier.
-  const mult = scriptDamageMultiplier(state, actor, moveData);
+  const mult = scriptDamageMultiplier(state, actor, moveData, ctx);
   const lethal = (r) => (probePower === 0 ? false : calcDamage(selfMon, foeMon, moveName,
     battleDamageOptions(r.roll != null && !Array.isArray(r.roll) ? { ...ctx, rollPercent: r.roll } : ctx, state, actor, moveData,
       r.variablePower ?? probePower, mult, !!((r.crit | 0) & 1))) >= foeHp);
@@ -10759,6 +10793,29 @@ function resolutionChanged(a, b) {
     || a.weatherType !== b.weatherType; // Forecast reads the weather
 }
 
+// PALACE FORK: ONE battler's action, outside a turn -- Pursuit's hit on a
+// switching mon (BattleScript_ActionSwitch, data/battle_scripts_1.s:3088-3110),
+// with `ctx.pursuitSwitch` doubling it. The action's own canceler runs (it
+// clears the attacker's Destiny Bond); no end of turn, no turn advance.
+// Returns [{ p, state }].
+function resolveSingleAction(ctx, state, actor, move, { pursuitSwitch = false } = {}) {
+  ctx = effectiveCtx(ctx, state);
+  if (pursuitSwitch) ctx = { ...ctx, pursuitSwitch: true };
+  const self = actor === "you" ? ctx.you : ctx.opp;
+  const md = battleMoveData(self, move);
+  const targetCharging = actor === "you" ? state.oppCharging : state.youCharging;
+  const out = [];
+  for (const o of enumerateActionOutcomes(ctx, state, actor, move, md, targetCharging, false)) {
+    const s = cloneState(state);
+    if (o.confTick) applyConfusionTick(s, actor, o.confTick);
+    clearOwnDestinyBond(s, actor);
+    applyMove(ctx, s, actor, move, o.hit, o.selfHit, o.secondaryTriggered, o.statusPrevented, o.thawed, o.endureTriggered, o.sleepRemaining ?? null, o.sleepDuration ?? null, o.protectTriggered ?? false, o.blockedByProtect ?? false, o.attractPrevented ?? false, o.attractGenderCompatible ?? null, o.hitCount ?? null, o.focusBanded ?? false, o.disableTimer ?? null, o.calledMove ?? null, o.variablePower ?? null, o.cancelReason ?? null, o.lockTurns ?? null, o.contactProc ?? null, o.contactSleep ?? null, o.crit ?? 0, o.roll ?? null, o.draw ?? null);
+    snapHp(ctx, s);
+    out.push({ p: o.p, state: s });
+  }
+  return out;
+}
+
 // ── PALACE FORK: the loafing action ────────────────────────────────────────
 // HandleAction_UseMove (src/battle_util.c:263-283): a battler whose
 // palaceUnableToUseMove is set never reaches its move's script -- so never the
@@ -10780,6 +10837,9 @@ function resolutionChanged(a, b) {
 // writes MOVE_UNAVAILABLE (src/battle_script_commands.c:4404-4414) and
 // MOVEEND_CHOICE_MOVE locks nothing (:4297).
 function palaceLoafOutcomes(ctx, state, actor, kind) {
+  // "switched": the battler's action this turn was a switch, already applied by
+  // the team layer (engine/team.js); its slot does nothing more.
+  if (kind === "switched") return [{ p: 1, loaf: kind, sleepRemaining: null, thawed: false }];
   if (kind !== "escape" && kind !== "plain") throw new Error(`palaceLoafOutcomes: kind "${kind}"`);
   const mon = actor === "you" ? ctx.you : ctx.opp;
   const status = state[actor + "Status"];
@@ -10794,6 +10854,7 @@ function palaceLoafOutcomes(ctx, state, actor, kind) {
   return [{ p: 1, loaf: kind, sleepRemaining: null, thawed: false }];
 }
 function applyPalaceLoaf(ctx, s, actor, o) {
+  if (o.loaf === "switched") return;
   if (o.sleepRemaining !== null) {
     if (o.sleepRemaining <= 0) {
       s[actor + "Status"] = null;
@@ -10809,6 +10870,7 @@ function applyPalaceLoaf(ctx, s, actor, o) {
 }
 function describeLoaf(actor, o) {
   const who = actor === "you" ? "You" : "Opp";
+  if (o.loaf === "switched") return `${who}: (switched in)`;
   const tail = o.sleepRemaining === 0 ? " (woke up)" : o.sleepRemaining ? " (still asleep)" : o.thawed ? " (thawed)" : "";
   return `${who} loafs (Palace)${tail}`;
 }
@@ -10818,11 +10880,14 @@ function describeLoaf(actor, o) {
 // still passed: it is the move in the slot the controller returned, which is
 // what the turn order reads (GetWhoStrikesFirst, src/battle_main.c, reads
 // moves[chosenMovePositions]) and what TryClearRageStatuses compares.
-function resolveTurn(ctx, state, yourMove, oppMove, { qc, loaf = null } = {}) {
+function resolveTurn(ctx, state, yourMove, oppMove, { qc, loaf = null, order = null } = {}) {
   // Resolve the overrides ONCE per turn, here, so that every downstream read of
   // mon.ability / mon.item sees the swapped values without any of them knowing
   // the swap exists.
   ctx = effectiveCtx(ctx, state);
+  // PALACE FORK: a fixed order -- a switching battler acts before every move
+  // (the team layer); no speed, priority or Quick Claw comparison applies.
+  if (order) return resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf);
   const { you, opp } = ctx;
   const yourMoveData = battleMoveData(you, yourMove);
   const oppMoveData = battleMoveData(opp, oppMove);
@@ -10958,6 +11023,13 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       continue;
     }
 
+    // PALACE FORK: a battler forced off the field this action takes no further
+    // part in the turn -- see continueAfterDrag.
+    if (s.youDraggedOut || s.oppDraggedOut) {
+      continueAfterDrag(ctx, state, s, fo.p, firstLabel, results);
+      continue;
+    }
+
     let secondMove = order[1] === "you" ? yourMove : oppMove;
     let secondMoveData = order[1] === "you" ? yourMoveData : oppMoveData;
     // B2b batch 9: MAGIC COAT'S BOUNCE. If the FIRST actor set bounceMove this
@@ -10996,12 +11068,36 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
         : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
+      if (s2.youDraggedOut || s2.oppDraggedOut) {
+        continueAfterDrag(ctx, s, s2, fo.p * so.p, `${firstLabel}; ${secondLabel}`, results);
+        continue;
+      }
       const ctx3 = resolutionChanged(s, s2) ? reResolve(ctx2, s2) : ctx2; // B8d: and the end of turn sees both actions' changes
       endOfTurnTail(ctx, ctx3, s2, fo.p * so.p, `${firstLabel}; ${secondLabel}`, results);
     }
   }
 
   return results;
+}
+
+// PALACE FORK: after a forced switch-out. YOUR mon dragged out: the team
+// layer's ctx.onDrag(state) brings the replacement in now -- returning
+// [{ p, state, you }] -- and the turn ends with the newcomer out (its
+// residuals, its Leftovers). The OPPONENT dragged out (or passing): the solve
+// ends there; the end of turn still runs for your mon, and the flag stays set
+// for the team layer to read.
+function continueAfterDrag(ctx, sBefore, s, pBase, label, results) {
+  snapHp(ctx, s);
+  if (s.youDraggedOut) {
+    if (!ctx.onDrag) throw new Error("continueAfterDrag: your mon was forced out with no team layer (ctx.onDrag) to bring in a replacement");
+    for (const d of ctx.onDrag(s)) {
+      const ctxN = effectiveCtx({ ...ctx, you: d.you, raw: undefined }, d.state);
+      endOfTurnTail(ctxN, ctxN, d.state, pBase * d.p, `${label} (dragged out)`, results);
+    }
+    return;
+  }
+  const ctxE = resolutionChanged(sBefore, s) ? reResolve(ctx, s) : ctx;
+  endOfTurnTail(ctx, ctxE, s, pBase, `${label} (opponent leaves the field)`, results);
 }
 
 // The end of a turn, shared by every path through resolveTurnWithOrder.
@@ -11226,8 +11322,11 @@ function advanceTurn(s) {
   s.turn += 1;
   // batch-4 decay: any successor turn is past the mon's first turn (see
   // buildStartState). B3 batch 2 adds the player's side of the same counter.
-  s.oppMonFirstTurn = false;
-  s.youMonFirstTurn = false;
+  // PALACE FORK: 2 = switched in during this turn (gDisableStructs.isFirstTurn
+  // = 2, src/battle_main.c:3220); TurnValuesCleanUp decrements it once per
+  // turn end (:4875-4876), so that mon's NEXT turn is still its first.
+  s.oppMonFirstTurn = s.oppMonFirstTurn === 2;
+  s.youMonFirstTurn = s.youMonFirstTurn === 2;
   // STATUS2_FLINCHED is cleared for every battler at the end of the turn
   // (src/battle_main.c:3943).
   s.turnFlags = 0;
@@ -11271,9 +11370,9 @@ export {
   // A2: the AI damage-roll enumeration, surfaced so tests and solver tools can
   // assert on the roll classes directly instead of re-deriving them.
   enumerateAiRollOutcomes, AI_SIM_ROLLS, buildAiDamageState,
-  buildStartState, resolveTurn,
+  buildStartState, resolveTurn, resolveSingleAction, recordAbility, permanentWeatherFromAbility, bumpStage,
   // B3 batch 7a: the volFlags accessor, for tests that inspect a folded flag.
-  vf, VF, TF_YOU_FLINCHED, TF_OPP_FLINCHED, TF_YOU_UNABLE, TF_OPP_UNABLE,
+  vf, setVf, VF, TF_YOU_FLINCHED, TF_OPP_FLINCHED, TF_YOU_UNABLE, TF_OPP_UNABLE,
   MOVES, AI_HANDLERS,
   // Phase D F11: the opponent as the ROM builds it (friendship by Frustration).
   buildFrontierOpponent,

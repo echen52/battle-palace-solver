@@ -254,7 +254,7 @@ function aiDecisionStateFor(state, side) {
 // P(draw) x choice(you | draw) x choice(opp | draw) x resolveTurn(.. | draw).
 // Same detection and threshold as resolveTurn's (GetWhoStrikesFirst:
 // gRandomTurnNumber < 0xFFFF * param / 100, out of a u16).
-function quickClawDraws(ctx, state) {
+export function quickClawDraws(ctx, state) {
   const ec = L.effectiveCtx(ctx, state);
   const qcItem = (mon) => {
     const it = itemData(mon.item);
@@ -268,7 +268,9 @@ function quickClawDraws(ctx, state) {
 
 // Returns [{ p, state, label, you: choice, opp: choice }] -- every successor of
 // one Palace turn, with the low-HP latches updated for the next one.
-export function palaceTurn(ctx, state) {
+// `ctxOf(state)`: the context for a successor (the team layer's -- a Roar can
+// change which of your mons is out during the turn).
+export function palaceTurn(ctx, state, { ctxOf = null } = {}) {
   const out = [];
   for (const draw of quickClawDraws(ctx, state)) {
     const yc = palaceChoices(ctx, state, "you", { qc: draw.qc });
@@ -281,7 +283,7 @@ export function palaceTurn(ctx, state) {
         if (o.aiRan) s = L.aiDecisionState(s, "opp");
         const loaf = { you: y.loaf, opp: o.loaf };
         for (const r of L.resolveTurn(ctx, s, y.move, o.move, { qc: draw.resolveQc, loaf })) {
-          const next = r.state.yourHpPct > 0 && r.state.oppHpPct > 0 ? updateLowHpLatches(ctx, r.state) : r.state;
+          const next = r.state.yourHpPct > 0 && r.state.oppHpPct > 0 ? updateLowHpLatches(ctxOf ? ctxOf(r.state) : ctx, r.state) : r.state;
           out.push({ p: draw.p * y.p * o.p * r.p, state: next, label: r.label, you: y, opp: o });
         }
       }
