@@ -1,9 +1,8 @@
 # CLAUDE.md — palace-solver
 
 Battle Palace engine (and, next, solver) for Pokémon Emerald. Started
-2026-10-02. **Step 1 (mechanics) is done; the solver design is not started —
-the user wants to brainstorm "how to solve beating one opponent mon" first.
-Do not build a solver before that conversation.**
+2026-10-02. **Mechanics, PP (Phase A) and the team layer (Phase B) are done;
+the design is AGREED (see "Phase C plan" below). Next session: build Phase C.**
 
 ## What this is
 
@@ -31,7 +30,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (4/4)
+## Tests — `bash tools/run-suite.sh` (6/6)
 
 | test | what it pins |
 |---|---|
@@ -66,13 +65,33 @@ Workflow rule learned the hard way: **commit before any mutation check** —
 - No emulator validation of the Palace layer yet (arena-solver/emu has the
   harness; Palace would need BATTLE_TYPE_PALACE battles).
 
-## Brainstorm agenda (for the user)
+## Phase C plan (agreed with the user 2026-10-02, not started)
 
-How to "solve" beating ONE opponent mon when neither side picks moves:
-objective (P(KO it first)? HP left after? P(win the 3v3)?), what the player's
-levers are (lead/order, team & sets, natures, when to switch), horizon (long
-battles → Markov chain with cycles, not a fixed-depth tree), opponent
-switching, and the IV tier / pool of the opponent.
+Goal: knock out the ONE opponent mon in front with minimal damage/status/PP
+cost to your team, without knowing its 2 teammates. Levers once the round
+starts: stay (attack) or switch. Opponent leaving = neutral "oppLeft", shown
+with its probability.
+
+1. **Score** (expected team score, weights editable, equal default): per mon
+   alive +0.25 + HP fraction − status (psn −0.10, brn −0.15, par −0.20,
+   slp −0.30, frz −0.40 proposed) − PP penalty; bonuses for boosts on the
+   final active mon (+0.05/stage), Spikes on their side (+0.05/layer),
+   screens; penalty for a low-HP active mon at the end. lose = 0; oppLeft =
+   team score with no KO bonus (optional koBonus). Show P(KO) alongside.
+   Cases the user wants covered: boosting setups, draining the opponent's
+   key-move PP, and the "no good switch vs a strong opponent" case.
+2. **Exact attempt** within a ~2 s budget (positions grow x20–50/turn, so only
+   short fights finish exactly).
+3. **Otherwise Monte Carlo** from the exactly enumerated root outcomes, with
+   margins of error. Rollout policy: stay; after a faint send the best-scoring
+   mon. Optional 2-turn decision version (measure how often it changes advice).
+   Speed-ups to build in: sample one outcome per simulated turn instead of
+   enumerating (~3–5x), worker threads (~4x), early stopping when separated.
+
+Measured cost (stay policy, full enumeration then sample, 100 games):
+Snorlax/Starmie 24 ms/game (12 turns), Metagross/Salamence 44 ms (5),
+Gengar/Dusclops 115 ms (44), Blissey/Skarmory 163 ms (99) — ~2–9 ms/turn.
+Target after speed-ups: a few seconds typical, ≤~30 s for stall fights.
 
 ## Side finding
 
