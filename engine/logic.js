@@ -40,6 +40,22 @@ import { EFFECT_ACCURACY_CHECK } from "./acc-check.js";
 import { EFFECT_DAMAGE_ADJUST } from "./damage-adjust.js";
 // Phase D F30: no damage roll for an effect whose script reaches only
 // adjustsetdamage (src/battle_script_commands.c:5861-5899 has no roll).
+// PALACE FORK — MEASUREMENT ONLY. Each flag switches one Palace-fork change
+// back to the Arena engine's behaviour, so tests/test-fork-equivalence.mjs can
+// (1) show the fork with every flag set reproduces the Arena engine exactly,
+// and (2) attribute every corpus probe the Palace behaviour moves to a named
+// change. Nothing but that test sets them; the defaults are the Palace.
+export const ARENA_COMPAT = {
+  protectReset: false,  // Protect's decay resets after a non-Protect resulting move
+  destinyBond: false,   // Destiny Bond lasts until the user's own next action
+  disableDraw: false,   // Disable's timer: all four draws, no 3-turn cap
+  encoreDraw: false,    // Encore's timer: 3..6 drawn, not a fixed 3
+  yawnDraw: false,      // Yawn's sleep: 2..5 drawn, not a fixed 2
+  perish: false,        // Perish Song counts down and faints
+  spite: false,         // Spite removes PP
+  grudge: false,        // Grudge empties the KO move's PP
+  pp: false,            // PP is spent
+};
 const ROLL_EXEMPT = (effect) => {
   const a = EFFECT_DAMAGE_ADJUST[effect];
   return !!a && a.length === 1 && a[0] === "adjustsetdamage";
@@ -141,6 +157,19 @@ function buildMon(config) {
     ability: config.ability,
     item: config.item,
     moves: config.moves,
+    // PALACE FORK: the mon's own moves (effectiveMon keeps this when Mimic /
+    // Transform override `moves`) and their max PP, CalculatePPWithBonus
+    // (src/pokemon.c): base + base * 20 * ppUps / 100, ppUps 0-3 per slot.
+    // Generated Frontier mons have none (CreateMon zeroes PP bonuses and
+    // SetMonMoveSlot sets base PP, src/battle_tower.c:1743).
+    baseMoves: config.moves,
+    maxPP: config.moves.map((m, i) => {
+      const base = MOVES[m]?.pp;
+      if (base == null) throw new Error(`buildMon: no base PP for "${m}"`);
+      const ups = Array.isArray(config.ppUps) ? (config.ppUps[i] ?? 0) : (config.ppUps ?? 0);
+      if (!(ups >= 0 && ups <= 3)) throw new Error(`buildMon: ppUps must be 0-3, got ${ups}`);
+      return base + Math.floor((base * 20 * ups) / 100);
+    }),
     stats,
     genderDist: resolveGenderDist(GENDER_RATIO[config.species], config.gender),
     // EFFECT_RETURN/EFFECT_FRUSTRATION power (Cmd_friendshiptodamagecalculation,
@@ -4032,9 +4061,11 @@ function selectableMoves(moves, s, side, foeMon, who) {
   const foeKnows = foeImprisoning ? new Set(foeMon.moves) : null;
 
   const reasons = [];
-  const legal = moves.filter((m) => {
+  const pp = s[isYou ? "youPP" : "oppPP"]; // PALACE FORK
+  const legal = moves.filter((m, i) => {
     const md = MOVES[m];
     if (!md) return false;
+    if (pp && pp[i] === 0) { reasons.push(`${m}: no PP`); return false; } // CheckMoveLimitations, MOVE_LIMITATION_PP
     if (disabled && m === disabled) { reasons.push(`${m}: disabled`); return false; }
     if (tormented && lastMove && m === lastMove) { reasons.push(`${m}: tormented`); return false; }
     if (tauntTurns != null && md.power === 0) { reasons.push(`${m}: taunted`); return false; }
@@ -4394,6 +4425,10 @@ function buildAiView(opp, you, state, { history = "battle", qc = false, debug = 
     },
     moveTable: AI_MOVE_TABLE,
     palaceMask, // PALACE FORK: [4 booleans] or null (see ai-interpreter runAi)
+    // PALACE FORK: BattleAI_DoAIProcessing (src/battle_ai_script_commands.c)
+    // sets moveConsidered = MOVE_NONE for a slot with no PP: no script runs on
+    // it and it scores 0 -- but ChooseMoveOrAction_Singles still lists it.
+    ppZero: [0, 1, 2, 3].map((i) => opp.moves[i] != null && (state.oppPP?.[i] ?? 1) === 0),
     aiDamage: (slot, roll) => (opp.moves[slot] ? aiCalcDamage(opp, you, opp.moves[slot], aiState, roll) : 0),
     typeEffDamageVar: (moveId) => aiTypeEffDamageVar(moveId, opp, you, state),
     debug,
@@ -5108,6 +5143,17 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     // (MOVEEND_UPDATE_LAST_MOVES, src/battle_script_commands.c:4404-4414).
     // Cmd_setprotectlike reads it (:6498-6501). See protectUsesFor.
     youLastResultingMove: null, oppLastResultingMove: null,
+    // PALACE FORK: PP. `xPP` is gBattleMons[].pp, per slot of the moves in
+    // use (Transform / Mimic included); `xPartyPP` is the party mon's PP for
+    // its own moves -- they differ only while a slot is Transformed or
+    // Mimicked (MOVE_IS_PERMANENT, include/battle.h), and the party values are
+    // what a mon brings back in after switching. Filled from the mons below.
+    youPP: null, oppPP: null, youPartyPP: null, oppPartyPP: null,
+    // PALACE FORK: STATUS3_GRUDGE (Cmd_trysetgrudge), cleared at the user's
+    // own CANCELER_FLAGS (src/battle_util.c:2012) like Destiny Bond.
+    youGrudge: false, oppGrudge: false,
+    // PALACE FORK: gDisableStructs.perishSongTimer (null = not perish-songed).
+    youPerishCount: null, oppPerishCount: null,
     youLastMove: null, oppLastMove: null, // gLastMoves[battler] equivalent — set unconditionally whenever that actor acts (src/battle_script_commands.c:4407, gLastMoves[gBattlerAttacker] = gChosenMove), regardless of hit/prevented. Needed by e.g. AI_CV_DefenseUp/AI_CV_SpDefUp's "was I just hit by a physical/special move" check.
     // Substitute: null = no sub. A number = the sub's REMAINING HP pool
     // (starts at floor(maxHP/4), min 1 — src/battle_script_commands.c:7808-7833).
@@ -5165,6 +5211,8 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
   // `base` here, BEFORE overrides are spread, which leaves an explicit
   // caller-supplied stage free to win as it always has.
   applyIntimidateOnSwitchIn(base, you, opp);
+  if (you) { base.youPP = you.maxPP.slice(); base.youPartyPP = you.maxPP.slice(); }
+  if (opp) { base.oppPP = opp.maxPP.slice(); base.oppPartyPP = opp.maxPP.slice(); }
   // B8c: TRACE (ABILITYEFFECT_TRACE, src/battle_util.c:3017-3040, run from
   // TryDoEventsBeforeFirstTurn, src/battle_main.c:3882): each Trace holder
   // takes the foe's ability at the start of the match. It runs AFTER the
@@ -5329,6 +5377,7 @@ function freshTurnDamageTracking(s) {
     ...s,
     youDamageTaken: null, oppDamageTaken: null, youEndureActive: false, oppEndureActive: false,
     youProtected: false, oppProtected: false,
+    ...(ARENA_COMPAT.destinyBond ? { youDestinyBondActive: false, oppDestinyBondActive: false } : {}),
   };
 }
 // PALACE FORK: CANCELER_FLAGS, the first case of AtkCanceller_UnableToUseMove
@@ -5337,13 +5386,72 @@ function freshTurnDamageTracking(s) {
 // clears the actor's own STATUS2_DESTINY_BOND. A Palace loaf never reaches it.
 function clearOwnDestinyBond(s, actor) {
   if (s[actor + "DestinyBondActive"]) s[actor + "DestinyBondActive"] = false;
+  if (s[actor + "Grudge"]) s[actor + "Grudge"] = false; // STATUS3_GRUDGE, same case (:2012)
 }
 // PALACE FORK: Cmd_setprotectlike (src/battle_script_commands.c:6494-6501)
 // resets protectUses to 0 when the user's last RESULTING move was not
 // Protect, Detect or Endure, before rolling. The stored counter itself is left
 // stale until then -- which is also what the AI reads (get_protect_count).
+// ── PALACE FORK: PP ──────────────────────────────────────────────────────
+// Copy-on-write: cloneState copies only the stage objects, so a PP array is
+// replaced, never mutated, or one branch's spend would leak into another's.
+function setPP(s, key, slot, value) {
+  const next = s[key].slice();
+  next[slot] = value;
+  s[key] = next;
+}
+// MOVE_IS_PERMANENT (include/battle.h): not Transformed, slot not Mimicked.
+function slotIsPermanent(s, actor, mon, slot) {
+  return !s[actor + "Transform"] && mon.moves[slot] === mon.baseMoves[slot];
+}
+// Cmd_ppreduce (src/battle_script_commands.c:1205-1250). One deduction per
+// action that reaches its move's ppreduce:
+//  - never for an action the canceler stopped (sleep, paralysis, flinch,
+//    confusion self-hit, love, recharge, Truant, Bide's storing turns ...):
+//    the caller passes those as prevented and never gets here;
+//  - never on a lock's continuation turn (Thrash, Uproar, Rollout, a two-turn
+//    move's strike, Bide's unleash): their scripts branch past ppreduce on
+//    STATUS2_MULTIPLETURNS (data/battle_scripts_1.s:587, 785, 1599, 1974,
+//    2077), and Bide's unleash runs from the canceler;
+//  - never for Struggle (HITMARKER_NO_PPDEDUCT, src/battle_util.c:104);
+//  - a miss, a Protect block and a Soundproof block DO pay (PrintMoveMissed
+//    and SoundproofProtected both run ppreduce, :273-275, :4158-4160);
+//  - Sleep Talk pays for itself only (it sets HITMARKER_NO_PPDEDUCT before the
+//    called move, :1322-1323); Metronome / Assist / Mirror Move pay through
+//    the called move's script, out of their own slot (gCurrMovePos unchanged).
+// The amount is 1, +1 for a foe with Pressure when the move targets it
+// (the default case: gBattlerTarget != attacker; a MOVE_TARGET_USER move
+// targets the user), except where the script sets ppNotAffectedByPressure:
+// Counter, Mirror Coat, Spikes, Magic Coat, Snatch, and Mirror Move's copy
+// (:6676, :7963, :7987, :8491, :9540, :9555). Pressure for Sleep Talk is read
+// on Sleep Talk itself (its ppreduce runs before the call); for Metronome and
+// Assist, on the called move. PP never goes below 0.
+// Returns "noPP" when the chosen slot is already empty (Spite or a Grudge
+// between selection and the action): Cmd_attackcanceler's
+// BattleScript_NoPPForMove (:934-939) -- the move fails, nothing is paid.
+const PRESSURE_EXEMPT = new Set(["Counter", "Mirror Coat", "Spikes", "Magic Coat", "Snatch"]);
+function spendPP(ctx, s, actor, chosen, executed, calledMove, continuation) {
+  if (ARENA_COMPAT.pp) return null;
+  if (continuation || chosen === "Struggle") return null;
+  const self = actor === "you" ? ctx.you : ctx.opp;
+  const foe = actor === "you" ? ctx.opp : ctx.you;
+  const key = actor + "PP";
+  const slot = self.moves.indexOf(chosen);
+  if (slot < 0 || !s[key]) return null;
+  if (s[key][slot] === 0) return "noPP";
+  const pressureMove = chosen === "Sleep Talk" ? chosen
+    : chosen === "Mirror Move" && calledMove ? null : executed;
+  let d = 1;
+  if (pressureMove && !PRESSURE_EXEMPT.has(pressureMove) && foe.ability === "Pressure"
+      && moveTarget(pressureMove) !== "MOVE_TARGET_USER") d += 1;
+  const left = Math.max(0, s[key][slot] - d);
+  setPP(s, key, slot, left);
+  if (slotIsPermanent(s, actor, self, slot)) setPP(s, actor + "PartyPP", self.baseMoves.indexOf(chosen), left);
+  return null;
+}
 const PROTECT_LIKE = new Set(["Protect", "Detect", "Endure"]);
 function protectUsesFor(lastResultingMove, uses) {
+  if (ARENA_COMPAT.protectReset) return uses;
   return PROTECT_LIKE.has(lastResultingMove) ? uses : 0;
 }
 
@@ -5907,7 +6015,7 @@ const HOLD_EFFECT_DISPOSITION = new Map([
   ["HOLD_EFFECT_FOCUS_BAND", ["deferred", "B7c — a per-hit survival roll"]],
   // -- inert in an Arena battle, each with its reason ----------------------
   ["HOLD_EFFECT_SOUL_DEW", ["inert", "source DISABLES it under BATTLE_TYPE_FRONTIER (src/pokemon.c:3187) and BATTLE_TYPE_ARENA is inside that mask"]],
-  ["HOLD_EFFECT_RESTORE_PP", ["inert", "Leppa — PP is not modelled and 3 turns cannot exhaust it"]],
+  ["HOLD_EFFECT_RESTORE_PP", ["end-of-turn", "Leppa — PALACE FORK: tryEndOfTurnItem"]],
   ["HOLD_EFFECT_MACHO_BRACE", ["inert", "EV training, not a battle effect"]],
   ["HOLD_EFFECT_EXP_SHARE", ["inert", "experience, not a battle effect"]],
   ["HOLD_EFFECT_LUCKY_EGG", ["inert", "experience, not a battle effect"]],
@@ -5958,6 +6066,24 @@ function tryEndOfTurnItem(s, side, mon) {
     case "HOLD_EFFECT_RESTORE_HP": {
       if (s[consumedKey] || curHp > Math.floor(maxHp / 2)) return;
       s[hpKey] = hpAdd(s[hpKey], d.param, maxHp);
+      s[consumedKey] = true;
+      s[side === "you" ? "youUsedItem" : "oppUsedItem"] = mon.item;
+      s[side === "you" ? "youItemOverride" : "oppItemOverride"] = null;
+      return;
+    }
+    // PALACE FORK: Leppa Berry, ITEMEFFECT_NORMAL (src/battle_util.c:3347-3378,
+    // :3615-3618). Scans the PARTY mon's PP for the first move at 0, restores
+    // `param` (10) capped at its max, and copies the value into the battle
+    // mon only if that slot is permanent (not Transformed / Mimicked).
+    case "HOLD_EFFECT_RESTORE_PP": {
+      if (s[consumedKey]) return;
+      const party = s[side + "PartyPP"];
+      if (!party) return;
+      const i = mon.baseMoves.findIndex((m, k) => m && party[k] === 0);
+      if (i < 0) return;
+      const value = Math.min(mon.maxPP[i], party[i] + d.param);
+      setPP(s, side + "PartyPP", i, value);
+      if (!s[side + "Transform"] && mon.moves[i] === mon.baseMoves[i]) setPP(s, side + "PP", i, value);
       s[consumedKey] = true;
       s[side === "you" ? "youUsedItem" : "oppUsedItem"] = mon.item;
       s[side === "you" ? "youItemOverride" : "oppItemOverride"] = null;
@@ -6612,14 +6738,37 @@ const EFFECT_EXECUTORS = {
   // Grudge (Cmd_trysetgrudge): strips all PP from the move that KOs the user.
   // PP is not modelled and a 3-turn match cannot exhaust it, so the flag would
   // never be read. Sets nothing.
-  EFFECT_GRUDGE: () => {},
+  // PALACE FORK: Cmd_trysetgrudge (src/battle_script_commands.c:9454-9465):
+  // fails if already set; the effect is in applyMove (Cmd_tryfaintmon :3027).
+  EFFECT_GRUDGE: (s, actor) => {
+    if (s[actor + "Grudge"]) return "failed";
+    s[actor + "Grudge"] = true;
+  },
   // Follow Me: redirects the opponents' attacks to the user. It is a
   // double-battle mechanic (MOVE_TARGET_BOTH redirection); the Arena is
   // singles, so there is nothing to redirect.
   EFFECT_FOLLOW_ME: () => {},
   // Spite (Cmd_trysetspite): removes 2-5 PP from the target's last move. Same
   // reason as Grudge -- no PP model, and 3 turns cannot run a move dry.
-  EFFECT_SPITE: () => {},
+  // PALACE FORK: Cmd_tryspiteppreduce (src/battle_script_commands.c:8318-8360):
+  // the target's last move must be known (not NONE / UNAVAILABLE), still in
+  // its set, and have more than 1 PP; it loses (Random() & 3) + 2, capped at
+  // what it has, arriving as `draw` (spiteBranches). Emptying it cancels the
+  // target's multi-turn move.
+  EFFECT_SPITE: (s, actor, ctx, _md, _sd, _ag, _dt, draw) => {
+    if (ARENA_COMPAT.spite) return undefined;
+    const isYou = actor === "you";
+    const foe = isYou ? "opp" : "you";
+    const foeMon = isYou ? ctx.opp : ctx.you;
+    const last = s[foe + "LastMove"];
+    const slot = last ? foeMon.moves.indexOf(last) : -1;
+    if (slot < 0 || !s[foe + "PP"] || s[foe + "PP"][slot] <= 1) return "failed";
+    if (!(draw >= 2 && draw <= 5)) throw new Error(`EFFECT_SPITE: no draw (got ${draw}) -- spiteBranches must supply it`);
+    const left = s[foe + "PP"][slot] - Math.min(draw, s[foe + "PP"][slot]);
+    setPP(s, foe + "PP", slot, left);
+    if (slotIsPermanent(s, foe, foeMon, slot)) setPP(s, foe + "PartyPP", foeMon.baseMoves.indexOf(last), left);
+    if (left === 0) cancelMultiTurnMoves(s, foe);
+  },
 
   // Taunt: Cmd_settaunt (src/battle_script_commands.c) sets tauntTimer = 2 on
   // the TARGET, and fails outright if a taunt is already running
@@ -6766,8 +6915,10 @@ const EFFECT_EXECUTORS = {
     const youEligible = !vf(s, "youPerishSonged") && you.ability !== "Soundproof";
     const oppEligible = !vf(s, "oppPerishSonged") && opp.ability !== "Soundproof";
     if (!youEligible && !oppEligible) return "failed";
-    if (youEligible) setVf(s, "youPerishSonged", true);
-    if (oppEligible) setVf(s, "oppPerishSonged", true);
+    if (youEligible) { setVf(s, "youPerishSonged", true); s.youPerishCount = 3; }
+    if (oppEligible) { setVf(s, "oppPerishSonged", true); s.oppPerishCount = 3; }
+    // PALACE FORK: perishSongTimer = 3 (src/battle_script_commands.c:8526);
+    // the countdown and the faint are in perishSongTick.
   },
   EFFECT_ACCURACY_DOWN: statDownExecutor("accuracy", 1, "Keen Eye"),
   // ── B2b batch 8: the nine the family sweep found missing ────────────────
@@ -7063,27 +7214,27 @@ const EFFECT_EXECUTORS = {
     // in its moveset AND it has no disabled move already. On turn 1 gLastMoves
     // is empty, so Disable simply fails -- which is why Disable is so often a
     // wasted turn-1 move and why AI_CV_Disable scores it down.
-    // PP != 0 is also required in source; PP is not modelled and three turns
-    // cannot exhaust it, so that clause is inert here (stated, not skipped).
+    // PALACE FORK: and the move's PP != 0 (src/battle_script_commands.c:7905).
     const isYou = actor === "you";
     const foeMon = isYou ? ctx.opp : ctx.you;
     const foeDisabledKey = isYou ? "oppDisabledMove" : "youDisabledMove";
     const foeLast = isYou ? s.oppLastMove : s.youLastMove;
     if (s[foeDisabledKey]) return "failed";
     if (!foeLast || !foeMon.moves.includes(foeLast)) return "failed";
+    if (s[isYou ? "oppPP" : "youPP"]?.[foeMon.moves.indexOf(foeLast)] === 0) return "failed";
     s[foeDisabledKey] = foeLast;
     s[isYou ? "oppDisableTurns" : "youDisableTurns"] = disableTimer;
   },
-  EFFECT_ENCORE: (s, actor, ctx) => {
+  EFFECT_ENCORE: (s, actor, ctx, _md, _sd, _ag, _dt, draw) => {
     // Cmd_trysetencore. Fails if the target is already encored, if its last
     // move is Struggle / Encore / Mirror Move, or if that move is no longer in
     // its set (which includes having no last move at all).
     //
-    // THE TIMER IS PROVEN INERT and is therefore not branched. Source sets
-    // (Random() & 3) + 3, i.e. 3..6. A mon is encored on turn t+j while the
-    // timer exceeds j, the timer decrements once per end-of-turn, and j can
-    // only reach 2 inside a 3-turn round -- so every draw in 3..6 behaves
-    // identically here. The minimum, 3, is stored as the representative.
+    // PALACE FORK: the timer is (Random() & 3) + 3, i.e. 3..6, uniform
+    // (src/battle_script_commands.c:8128). The Arena engine stored 3 as a
+    // representative because a 3-turn round could not tell the draws apart; a
+    // Palace battle can, so it is enumerated (encoreTimerBranches) and arrives
+    // as `draw`. Also fails when the move has no PP (:8122).
     const isYou = actor === "you";
     const foeMon = isYou ? ctx.opp : ctx.you;
     const foeEncoredKey = isYou ? "oppEncoredMove" : "youEncoredMove";
@@ -7091,8 +7242,10 @@ const EFFECT_EXECUTORS = {
     if (s[foeEncoredKey]) return "failed";
     if (!foeLast || !foeMon.moves.includes(foeLast)) return "failed";
     if (foeLast === "Struggle" || foeLast === "Encore" || foeLast === "Mirror Move") return "failed";
+    if (s[isYou ? "oppPP" : "youPP"]?.[foeMon.moves.indexOf(foeLast)] === 0) return "failed";
+    if (![3, 4, 5, 6].includes(draw)) throw new Error(`EFFECT_ENCORE: no timer draw (got ${draw}) -- encoreTimerBranches must supply it`);
     s[foeEncoredKey] = foeLast;
-    s[isYou ? "oppEncoreTurns" : "youEncoreTurns"] = 3;
+    s[isYou ? "oppEncoreTurns" : "youEncoreTurns"] = draw;
   },
   EFFECT_TORMENT: (s, actor) => {
     // Cmd_settorment: fails outright if STATUS2_TORMENT is already set.
@@ -7622,8 +7775,26 @@ function applyMove(ctx, s, actor, ...rest) {
   // a number for one hit, an array per hit -- read by battleDamageOptions and
   // the confusion self-hit. Without ctx.exactRoll no outcome carries one.
   const roll = rest[23]; // after crit (rest[22]); applyMoveCore takes 23 after actor
+  const draw = rest[24]; // PALACE FORK: a status move's own draw (Spite / Encore), see spiteBranches
+  if (draw != null) ctx = { ...ctx, draw };
+  const foeHpBefore = s[isYou ? "oppHpPct" : "yourHpPct"]; // PALACE FORK: Grudge, below
   applyMoveCore(roll != null ? { ...ctx, rollPercent: roll } : ctx, s, actor, ...rest.slice(0, 23));
   snapHp(ctx, s); // B6 step 1: the action's HP changes, as integer HP
+  // PALACE FORK: GRUDGE (Cmd_tryfaintmon, src/battle_script_commands.c:3027-
+  // 3043). The foe this action knocked out held a grudge, the attacker is still
+  // standing (a Destiny Bond, checked first, would have taken it) and the move
+  // was not Struggle: the chosen slot's PP drops to 0.
+  {
+    const foe = isYou ? "opp" : "you";
+    const chosen = rest[0];
+    const self = isYou ? ctx.you : ctx.opp;
+    const slot = self.moves.indexOf(chosen);
+    if (!ARENA_COMPAT.grudge && s[foe + "Grudge"] && foeHpBefore > 0 && s[isYou ? "oppHpPct" : "yourHpPct"] <= 0
+        && s[isYou ? "yourHpPct" : "oppHpPct"] > 0 && chosen !== "Struggle" && slot >= 0 && s[actor + "PP"]) {
+      setPP(s, actor + "PP", slot, 0);
+      if (slotIsPermanent(s, actor, self, slot)) setPP(s, actor + "PartyPP", self.baseMoves.indexOf(chosen), 0);
+    }
+  }
   // Phase D F26: MOVEEND_CHOICE_MOVE (src/battle_script_commands.c:4296-4308)
   // runs at the end of EVERY move that obeyed -- hit, miss, fail or blocked by
   // Protect -- and reads the attacker's hold effect as it is THEN (after a
@@ -7770,6 +7941,17 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
       s[isYou ? "youNightmared" : "oppNightmared"] = false;
     } else {
       s[selfSleepTurnsKey] = sleepRemaining;
+    }
+  }
+
+  // PALACE FORK: PP (see spendPP). A lock already running before this action
+  // means a continuation turn: no ppreduce.
+  if (!statusPrevented && !attractPrevented && !selfHit) {
+    const continuation = !!(s[actor + "Lock"] || s[actor + "Charging"]);
+    if (spendPP(ctx, s, actor, chosenMoveName, moveName, calledMove, continuation) === "noPP") {
+      s[selfLastMoveKey] = null; // BattleScript_NoPPForMove: no HITMARKER_OBEYS
+      s[actor + "LastResultingMove"] = null;
+      return;
     }
   }
 
@@ -7927,6 +8109,9 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     s[isYou ? "youDisabledMove" : "oppDisabledMove"] = null;
     s[isYou ? "youDisableTurns" : "oppDisableTurns"] = null;
     s[isYou ? "youMoves" : "oppMoves"] = null;           // mimickedMoves = 0
+    // PALACE FORK: PP of every copied slot = min(5, base PP) (src/battle_script_commands.c:7795-7800).
+    // The party PP is untouched (not a permanent slot any more).
+    s[isYou ? "youPP" : "oppPP"] = foeMon.moves.map((m) => Math.min(5, MOVES[m].pp));
     s[isYou ? "youAbilityOverride" : "oppAbilityOverride"] = null; // the copied ability replaces any swap
     s[selfLastMoveKey] = null;                          // gChosenMove = MOVE_UNAVAILABLE
     return;
@@ -7956,6 +8141,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const next = known.slice();
     next[slot] = copy;
     s[isYou ? "youMoves" : "oppMoves"] = next;
+    setPP(s, isYou ? "youPP" : "oppPP", slot, Math.min(5, MOVES[copy].pp)); // PALACE FORK: Cmd_mimicattackcopy :7868-7872
     return;
   }
 
@@ -8866,7 +9052,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     if (executor) {
       // An executor's return value ("failed" / "missed" / { printed }) fed only
       // the Arena's Skill scoring; the Palace fork does not read it.
-      executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer);
+      executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer, ctx.draw ?? null);
     } else {
       // A3: the EFFECT_TOXIC exemption that used to live on this branch is GONE.
       // It let Toxic land, score +1 Skill and apply nothing whenever the target
@@ -8920,7 +9106,7 @@ function isWeatherChipImmune(weatherType, mon, charging) {
   return true; // rain/sun/no-weather never chip
 }
 
-function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
+function applyEndOfTurnEffects(ctx, s, shedSkinCure = null, yawnSleep = null) {
   const { you, opp } = ctx;
 
   // Phase D F34: WISH is a FIELD end-turn step -- DoFieldEndTurnEffects runs
@@ -9209,10 +9395,14 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
     s[timerKey] -= 1;
     if (s[timerKey] <= 0) { s[timerKey] = null; s[moveKey] = null; }
   }
-  for (const [timerKey, moveKey] of [["youEncoreTurns", "youEncoredMove"], ["oppEncoreTurns", "oppEncoredMove"]]) {
+  for (const [timerKey, moveKey, side] of [["youEncoreTurns", "youEncoredMove", "you"], ["oppEncoreTurns", "oppEncoredMove", "opp"]]) {
     if (s[timerKey] == null) continue;
     s[timerKey] -= 1;
-    if (s[timerKey] <= 0) { s[timerKey] = null; s[moveKey] = null; }
+    // PALACE FORK: ENDTURN_ENCORE also ends it when the encored move's PP is 0
+    // (src/battle_util.c:1727-1728).
+    const mon = side === "you" ? you : opp;
+    const ppOut = s[side + "PP"]?.[mon.moves.indexOf(s[moveKey])] === 0;
+    if (s[timerKey] <= 0 || ppOut) { s[timerKey] = null; s[moveKey] = null; }
   }
 
   // Reflect/Light Screen duration: a SEPARATE end-of-turn tracker from the
@@ -9258,7 +9448,7 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
       s.youYawnTurns = null;
       if (s.youStatus == null && you.ability !== "Insomnia" && you.ability !== "Vital Spirit" && !uproarKeepsAwake(s, you)) {
         s.youStatus = "sleep";
-        s.youSleepTurns = 2;
+        s.youSleepTurns = yawnSleepTurns(yawnSleep, "you"); // PALACE FORK: the 2-5 draw
         cancelMultiTurnMoves(s, "you"); // ENDTURN_YAWN calls it explicitly (src/battle_util.c:1761) -- not via SetMoveEffect, as batch 2's note said
       }
     }
@@ -9269,10 +9459,43 @@ function applyEndOfTurnEffects(ctx, s, shedSkinCure = null) {
       s.oppYawnTurns = null;
       if (s.oppStatus == null && opp.ability !== "Insomnia" && opp.ability !== "Vital Spirit" && !uproarKeepsAwake(s, opp)) {
         s.oppStatus = "sleep";
-        s.oppSleepTurns = 2;
+        s.oppSleepTurns = yawnSleepTurns(yawnSleep, "opp"); // PALACE FORK: the 2-5 draw
         cancelMultiTurnMoves(s, "opp"); // ENDTURN_YAWN calls it explicitly (src/battle_util.c:1761) -- not via SetMoveEffect, as batch 2's note said
       }
     }
+  }
+}
+
+// PALACE FORK: ENDTURN_YAWN's sleep takes the same (Random() & 3) + 2 as any
+// sleep (src/battle_util.c:1762). The Arena engine fixed 2 because its round
+// ended before any draw could matter; here the draw is a branch (yawnDraws).
+function yawnSleepTurns(yawnSleep, side) {
+  const d = yawnSleep?.[side];
+  if (![2, 3, 4, 5].includes(d)) throw new Error(`ENDTURN_YAWN (${side}): no sleep-duration draw -- yawnDraws must supply it`);
+  return d;
+}
+function yawnDraws(s) {
+  if (ARENA_COMPAT.yawnDraw) return [{ p: 1, you: 2, opp: 2 }];
+  let out = [{ p: 1, you: null, opp: null }];
+  for (const side of ["you", "opp"]) {
+    if (s[side + "YawnTurns"] !== 1) continue; // completes at this end-of-turn
+    out = out.flatMap((b) => [2, 3, 4, 5].map((d) => ({ ...b, p: b.p * 0.25, [side]: d })));
+  }
+  return out;
+}
+// PALACE FORK: PERISH SONG's countdown, HandleWishPerishSongOnTurnEnd case 1
+// (src/battle_util.c), after Future Sight (case 0): a timer at 0 faints the
+// mon (and clears STATUS3_PERISH_SONG); otherwise it ticks down. Set to 3 on
+// the turn of use, so the faint lands at the fourth end-of-turn counting that
+// one. Absent (fainted) battlers are skipped.
+function perishSongTick(s) {
+  if (ARENA_COMPAT.perish) return;
+  for (const side of ["you", "opp"]) {
+    const k = side + "PerishCount";
+    const hpKey = side === "you" ? "yourHpPct" : "oppHpPct";
+    if (s[k] == null || s[hpKey] <= 0) continue;
+    if (s[k] === 0) { s[hpKey] = 0; s[k] = null; setVf(s, side + "PerishSonged", false); }
+    else s[k] -= 1;
   }
 }
 
@@ -10074,9 +10297,9 @@ function enumerateMoveBody(ctx, state, actor, moveName, moveData, targetCharging
       }
     }
   }
-  return disableTimerBranches(ctx, state, actor, moveData,
+  return statusDrawBranches(ctx, state, actor, moveData, disableTimerBranches(ctx, state, actor, moveData,
     contactAbilityBranches(ctx, state, actor, moveName, moveData,
-      focusBandBranches(ctx, state, actor, moveName, moveData, rollSplit(ctx, state, actor, moveName, moveData, critSplit(ctx, state, actor, moveData, results, moveName)))));
+      focusBandBranches(ctx, state, actor, moveName, moveData, rollSplit(ctx, state, actor, moveName, moveData, critSplit(ctx, state, actor, moveData, results, moveName))))));
 }
 
 // ── B8: THE CONTACT ABILITIES (ABILITYEFFECT_ON_DAMAGE, src/battle_util.c:
@@ -10173,20 +10396,50 @@ function contactAbilityBranches(ctx, state, actor, moveName, moveData, results) 
   return out;
 }
 
-// Disable's timer, enumerated as weighted branches -- and COLLAPSED by the same
-// rule as Quick Claw and Focus Band: branch only where the draws differ in
-// anything the round can observe.
-//
-// Cmd_disablelastusedattack sets `(Random() & 3) + 2`, i.e. {2,3,4,5} at 1/4
-// each. The timer decrements once per end-of-turn and the lock lifts at 0, so a
-// mon disabled on turn t is still locked on turn t+j exactly while timer > j.
-// Inside a 3-turn round j can only reach 3 - t, so the OBSERVABLE value is
-// min(T, 4 - t):
-//   used on turn 1 -> min(T,3): {2 at 1/4, 3 at 3/4}   TWO classes
-//   used on turn 2 -> min(T,2): every draw gives 2      one class
-//   used on turn 3 -> min(T,1): nothing left to observe one class
-// So the four draws cost at most a 2-way split, and only on a turn-1 Disable.
+// Disable's timer, enumerated as weighted branches. Cmd_disablelastusedattack
+// sets `(Random() & 3) + 2`, i.e. {2,3,4,5} at 1/4 each (src/battle_script_
+// commands.c:7908). PALACE FORK: the Arena engine collapsed the draws to what
+// its 3-turn round could observe (min(T, 4 - t)); a Palace battle has no such
+// horizon, so all four are kept.
 const DISABLE_TIMER_DRAWS = [2, 3, 4, 5]; // (Random() & 3) + 2, uniform
+// PALACE FORK: the two other status moves whose effect draws a number --
+// Spite's (Random() & 3) + 2 PP and Encore's (Random() & 3) + 3 turns -- as
+// weighted branches on the landed outcomes, `draw` on each. Only where the
+// executor will succeed; equal effects (Spite capped at the PP left) merge.
+function statusDrawBranches(ctx, state, actor, moveData, results) {
+  const isYou = actor === "you";
+  const foe = isYou ? "opp" : "you";
+  const foeMon = isYou ? ctx.opp : ctx.you;
+  const last = state[foe + "LastMove"];
+  const slot = last ? foeMon.moves.indexOf(last) : -1;
+  const pp = state[foe + "PP"];
+  const bucketsFor = (e) => {
+    if (e === "EFFECT_SPITE") {
+      if (ARENA_COMPAT.spite) return null;
+      if (slot < 0 || !pp || pp[slot] <= 1) return null;
+      const m = new Map();
+      for (const d of [2, 3, 4, 5]) { const k = Math.min(d, pp[slot]); m.set(k, (m.get(k) || 0) + 0.25); }
+      return m;
+    }
+    if (e === "EFFECT_ENCORE") {
+      if (state[foe + "EncoredMove"] || slot < 0 || ["Struggle", "Encore", "Mirror Move"].includes(last)) return null;
+      if (pp && pp[slot] === 0) return null;
+      return ARENA_COMPAT.encoreDraw ? new Map([[3, 1]]) : new Map([3, 4, 5, 6].map((d) => [d, 0.25]));
+    }
+    return null;
+  };
+  // the effect that executes: a called move's (Sleep Talk / Metronome ...) or the chosen one's
+  const effectOf = (r) => (r.calledMove ? MOVES[r.calledMove]?.effect : moveData.effect);
+  if (!results.some((r) => r.hit === true && bucketsFor(effectOf(r)))) return results;
+  const out = [];
+  for (const r of results) {
+    const buckets = r.hit === true ? bucketsFor(effectOf(r)) : null;
+    if (!buckets) { out.push(r); continue; }
+    for (const [draw, p] of buckets) out.push({ ...r, p: r.p * p, draw });
+  }
+  return out;
+}
+
 function disableTimerBranches(ctx, state, actor, moveData, results) {
   if (moveData.effect !== "EFFECT_DISABLE") return results;
   const isYou = actor === "you";
@@ -10196,12 +10449,10 @@ function disableTimerBranches(ctx, state, actor, moveData, results) {
   const foeLast = isYou ? state.oppLastMove : state.youLastMove;
   if (!foeLast || !foeMon.moves.includes(foeLast)) return results;
 
-  const observableCap = Math.max(1, 4 - state.turn);
+  if (state[isYou ? "oppPP" : "youPP"]?.[foeMon.moves.indexOf(foeLast)] === 0) return results; // fails on PP 0
   const buckets = new Map();
-  for (const draw of DISABLE_TIMER_DRAWS) {
-    const observable = Math.min(draw, observableCap);
-    buckets.set(observable, (buckets.get(observable) || 0) + 1 / DISABLE_TIMER_DRAWS.length);
-  }
+  const cap = ARENA_COMPAT.disableDraw ? Math.max(1, 4 - state.turn) : Infinity;
+  for (const draw of DISABLE_TIMER_DRAWS) { const k = Math.min(draw, cap); buckets.set(k, (buckets.get(k) || 0) + 1 / DISABLE_TIMER_DRAWS.length); }
   if (buckets.size === 1) {
     const only = [...buckets.keys()][0];
     return results.map((r) => (r.hit ? { ...r, disableTimer: only } : r));
@@ -10684,7 +10935,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
     if (!firstLoaf && fo.confTick) applyConfusionTick(s, order[0], fo.confTick);
     const bidePre1 = (s.youLock?.kind === "bide" || s.oppLock?.kind === "bide") ? bideSnapshot(s) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
     if (!firstLoaf) clearOwnDestinyBond(s, order[0]);
-    if (!firstLoaf) applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null);
+    if (!firstLoaf) applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null, fo.draw ?? null);
     if (bidePre1) bideAccumulate(ctx, s, bidePre1);
     const firstLabel = ctx.noLabels ? "" : firstLoaf ? describeLoaf(order[0], fo)
       : describeAction(order[0], firstMove, fo.hit, fo.selfHit, fo.statusPrevented, fo.attractPrevented, fo.hitCount ?? null, fo.calledMove ?? null, fo.cancelReason ?? null);
@@ -10732,7 +10983,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       const applyAs = bounced ? order[0] : order[1];
       const bidePre2 = (s2.youLock?.kind === "bide" || s2.oppLock?.kind === "bide") ? bideSnapshot(s2) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
       if (!secondLoaf) clearOwnDestinyBond(s2, order[1]);
-      if (!secondLoaf) applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null);
+      if (!secondLoaf) applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null, so.draw ?? null);
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
         : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
@@ -10741,14 +10992,17 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       const bothUp = s2.yourHpPct > 0 && s2.oppHpPct > 0;
       const ctx3 = resolutionChanged(s, s2) ? reResolve(ctx2, s2) : ctx2; // B8d: and the end of turn sees both actions' changes
       const eot = bothUp ? shedSkinBranches(ctx3, s2) : NO_SHED_SKIN;
-      for (const eb of eot) {
-        const s3 = eot.length > 1 ? cloneState(s2) : s2;
-        if (bothUp) applyEndOfTurnEffects(ctx3, s3, eb.cure);
+      const yawns = bothUp ? yawnDraws(s2) : [{ p: 1, you: null, opp: null }];
+      for (const eb0 of eot) for (const yd of yawns) {
+        const eb = yawns.length > 1 ? { ...eb0, p: eb0.p * yd.p } : eb0;
+        const s3 = eot.length > 1 || yawns.length > 1 ? cloneState(s2) : s2;
+        if (bothUp) applyEndOfTurnEffects(ctx3, s3, eb.cure, yd);
         // B3 batch 5b: Future Sight releases AFTER the end-of-turn effects
         // (HandleWishPerishSongOnTurnEnd, case 0) and BEFORE the Arena judges
         // (case 2 of the same function) -- so a turn-1 Future Sight lands before
         // turn 3 is judged. Its accuracy roll and Focus Band are real branches.
         for (const fb of futureSightRelease(ctx3, s3)) {
+          perishSongTick(fb.state); // PALACE FORK: after Future Sight
           snapHp(ctx, fb.state); // end-of-turn residuals and Future Sight
           advanceTurn(fb.state);
           results.push({ p: fo.p * so.p * eb.p * fb.p, state: fb.state, label: `${firstLabel}; ${secondLabel}${eb.label ?? ""}${fb.label}` });

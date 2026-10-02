@@ -35,19 +35,22 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 
 | test | what it pins |
 |---|---|
-| test-fork-equivalence | 7,164 probes (AI decisions + resolveTurn) vs the Arena engine; fork-only fields stripped, equal end states merged; 16 intended (Protect reset, attributed by neutralisation) |
+| test-fork-equivalence | 7,178 probes (AI decisions + resolveTurn) vs the Arena engine, replayed by successor hash. With every ARENA_COMPAT flag set: 7,178/7,178 identical. Palace defaults move 45, every one attributed to a single flag (Protect 16, Disable 10, Yawn 12, Encore 6, Destiny Bond 1) |
 | test-mirror | involution + battle symmetry on 1,859 corpus positions (detector caught a planted one-sided Leftovers skip) |
 | test-palace | groups 354/354 vs battle_moves.h parsed directly; nature rows vs source comments; fallback + vanilla bug; loafs; limits; latch; history; 602 corpus positions |
 | test-engine-fixes | Protect reset, Destiny Bond timing (5/8 fail on the unfixed engine) |
+| test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
 `git checkout -- file` restores the last commit, not the pre-mutation file.
 
 ## Known gaps (stated, not silent)
 
-- **PP is not modelled** (no PP state in the engine): the group mask's PP test,
-  the AI's pp==0 skip, the 0-PP loaf, and Struggle-by-PP never fire. Palace
-  battles run long (Rest/Recover loops), so this matters more than in the Arena.
+- PP (Phase A, 2026-10-02) is modelled: battle + party PP, ppreduce rules,
+  Pressure, Struggle, the Palace mask / AI / loaf hooks, Leppa, Spite, Grudge,
+  Transform/Mimic, and the Arena-horizon durations (Disable, Encore, Yawn,
+  Perish Song) un-capped. Known edge left: a "no PP left" failure still lets a
+  Choice item lock (needs Spite into a Choice holder).
 - **No party**: Roar/Whirlwind/Baton Pass always fail ("no reserve"), the
   opponent's AI switching (ShouldSwitch is NOT disabled in the Palace —
   src/battle_ai_switch_items.c:452 exempts only the Arena) and the player's own

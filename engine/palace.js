@@ -17,9 +17,10 @@
 // AI decides for `opp` only, so the player's decision is made on the mirrored
 // position (mirror.js).
 //
-// NOT MODELLED (stated, not silent): PP. The engine has no PP state, so every
-// move is assumed to have PP left: the group mask's currentPp test (:151), the
-// AI's pp == 0 skip, CheckMoveLimitations' PP bit and the 0-PP loaf never fire.
+// PP: the group mask keeps only slots with PP (:151); the AI skips 0-PP slots
+// (logic.js buildAiView ppZero); CheckMoveLimitations' PP bit makes them
+// unusable (selectableMoves), so a 0-PP pick loafs with the escape script and
+// a mon with nothing usable Struggles (AreAllMovesUnusable).
 
 import * as L from "./logic.js";
 import { moveTarget } from "./move-flags.js";
@@ -214,7 +215,9 @@ export function palaceChoices(ctx, state, side, { qc = false } = {}) {
   for (const g of [ATTACK, DEFENSE, SUPPORT]) {
     const pg = roll[g];
     if (pg === 0) continue;
-    const mask = [0, 1, 2, 3].map((i) => i < moves.length && groups[i] === g);
+    // selectedMoves: the rolled group's slots that still have PP (:149-155)
+    const pp = state[side + "PP"];
+    const mask = [0, 1, 2, 3].map((i) => i < moves.length && groups[i] === g && (!pp || pp[i] !== 0));
     if (mask.some(Boolean)) {
       // :149-166 -> BattleAI_SetupAIData(selectedMoves); the AI runs.
       for (const { move, prob } of aiFor(ctx, decided, side, mask, qc)) {

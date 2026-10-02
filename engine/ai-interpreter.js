@@ -301,7 +301,8 @@ export function runAi(view, rolls) {
   let threads = [{ fr: 0, scores: view.mon[U].moves.map((m, i) => (m === 0 ? 0 : view.limited[i] ? 0 : inMask(i) ? 100 : 0)), g: null, p: 1 }];
   for (const root of SCRIPTS) {
     for (let slot = 0; slot < 4; slot++) {
-      if (view.mon[U].moves[slot] === 0) { for (const t of threads) t.scores[slot] = 0; continue; }
+      // an empty slot -- and (PALACE FORK) a slot with no PP: moveConsidered = MOVE_NONE
+      if (view.mon[U].moves[slot] === 0 || view.ppZero?.[slot]) { for (const t of threads) t.scores[slot] = 0; continue; }
       const finished = [];
       let live = threads.map((t) => ({ ...t, pc: AI_LABELS[root], stack: [], done: false }));
       let guard = 0;

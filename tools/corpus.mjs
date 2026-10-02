@@ -2,27 +2,32 @@
 //
 // Walks a deterministic set of Frontier-vs-Frontier positions through an
 // engine directory and returns one hash per probe. A probe is either the AI's
-// decision at a position (aiTurnPlans) or one resolveTurn call. Run against the
-// ORIGINAL Arena engine it produces the golden file; run against this repo's
-// engine it must reproduce every hash, except for fields the fork removed on
-// purpose (STRIP_KEYS -- the Arena's Mind / Skill judging state).
+// decision at a position (aiTurnPlans) or one resolveTurn call.
 //
-// Usage: node tools/corpus.mjs <engineDir> [--out file.json]
-
+// RECORD mode (no `golden`): each step's successor is drawn at random from the
+// turn's merged result, and its canonical hash is stored on the probe (`next`).
+// REPLAY mode (`golden` given): the walk follows the recorded successors by
+// hash, so an engine that splits a turn into more or different outcomes still
+// walks the SAME positions as the recording; when the recorded successor does
+// not exist in the replaying engine, that pair's walk ends (`lost`).
+//
+// Hashes strip the fields the fork adds (STRIP_KEYS) and the Arena's judging
+// state, so they compare behaviour, not representation.
+//
+// Usage: node tools/corpus.mjs <engineDir> [--out file.json]   (record)
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
-// The Arena judging state. The fork deletes it; everything else must match.
 export const STRIP_KEYS = new Set(["mindYou", "mindOpp", "skillYou", "skillOpp",
-  // Fields the fork ADDS (the player's AI's knowledge of the opponent). The
-  // Arena engine has no such state; its absence there is not a difference.
-  "oppAbilityRecord", "oppMoveHistory", "youLastResultingMove", "oppLastResultingMove"]);
+  // Fields the fork ADDS. The Arena engine has no such state; its absence there
+  // is not a difference.
+  "oppAbilityRecord", "oppMoveHistory", "youLastResultingMove", "oppLastResultingMove",
+  "youPP", "oppPP", "youPartyPP", "oppPartyPP", "youGrudge", "oppGrudge", "youPerishCount", "oppPerishCount"]);
 // The fork records MOVE_UNAVAILABLE into the AI's move history where the Arena
-// engine recorded nothing (slot occupancy, engine/logic.js
-// recordTargetMoveHistory). Dropped here; the AI probes still compare every
-// decision made from those histories, which is what proves the reads equal.
+// engine recorded nothing (slot occupancy). Dropped here; the AI probes still
+// compare every decision made from those histories.
 const UNAVAILABLE = "(unavailable)";
 
 function rng(seed) {
@@ -39,13 +44,11 @@ function rng(seed) {
 const canon = (v) => JSON.stringify(v, (k, x) => (STRIP_KEYS.has(k) ? undefined
   : k === "youMoveHistory" && Array.isArray(x) ? x.filter((m) => m !== UNAVAILABLE) : x));
 // Rounded in BINARY: the probabilities are mostly dyadic (1/2, 1/16, 1/256...),
-// which a decimal rounding can land exactly on the boundary of -- one merged
-// sum 1 ULP off then flips the last digit. 2^-40 holds any dyadic up to that
-// depth exactly and snaps float noise back onto it.
+// which a decimal rounding can land exactly on the boundary of.
 const round = (p) => Math.round(p * 2 ** 40) / 2 ** 40;
+const md5 = (s) => createHash("md5").update(s).digest("hex");
 // A turn's result as a distribution over canonical states: labels dropped,
-// branches that end in the same state merged. Returns [[p, stateString, state]]
-// sorted by stateString, so the walk below cannot see how a result was split.
+// equal end states merged, sorted. Returns [[p, stateString, state]].
 function mergeTurn(res) {
   const m = new Map();
   for (const r of res) {
@@ -55,34 +58,36 @@ function mergeTurn(res) {
   }
   return [...m.values()].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
 }
-const md5 = (s) => createHash("md5").update(s).digest("hex");
 
-export async function runCorpus(engineDir, { pairs = 1500, depth = 3, seed = 20261002 } = {}) {
+export async function runCorpus(engineDir, { pairs = 1500, depth = 3, seed = 20261002, golden = null } = {}) {
   const url = (f) => pathToFileURL(path.resolve(engineDir, f)).href;
   const L = await import(url("logic.js"));
   const { FRONTIER_POOL } = await import(url("frontier-pool.js"));
   const { getOpponentConfig } = await import(url("opponent-adapter.js"));
   const names = Object.keys(FRONTIER_POOL).filter((n) => FRONTIER_POOL[n].lv50Legal);
-  const r = rng(seed);
-  const pick = (a) => a[Math.floor(r() * a.length)];
-  const cfg = (name) => {
-    const e = FRONTIER_POOL[name];
-    return getOpponentConfig(name, { ability: pick(e.abilities) });
-  };
+  const nextOf = golden ? new Map(golden.filter((g) => g.next).map((g) => [g.id, g.next])) : null;
+  const pairRng = rng(seed);
   const probes = [];
-  const rec = (kind, id, fn, view = canon) => {
-    let out;
-    try { out = view(fn()); } catch (e) { out = "THROW:" + String(e.message).slice(0, 200); }
-    if (process.env.CORPUS_DUMP && id === process.env.CORPUS_DUMP) console.log(out); // debugging: the probe's canonical output
-    probes.push({ kind, id, h: md5(out), t: out.startsWith("THROW:") ? 1 : 0 });
-  };
+  let lost = 0;
   for (let i = 0; i < pairs; i++) {
-    const yName = pick(names), oName = pick(names);
-    const you = L.buildMon(cfg(yName));
-    const opp = L.buildMon({ ...cfg(oName), friendship: 255 });
+    const pick0 = (a) => a[Math.floor(pairRng() * a.length)];
+    const yName = pick0(names), oName = pick0(names);
+    const yAb = pick0(FRONTIER_POOL[yName].abilities), oAb = pick0(FRONTIER_POOL[oName].abilities);
+    const r = rng(seed * 7919 + i); // the walk's own stream: independent of other pairs
+    const pick = (a) => a[Math.floor(r() * a.length)];
+    const rec = (kind, id, fn, view = canon) => {
+      let out;
+      try { out = view(fn()); } catch (e) { out = "THROW:" + String(e.message).slice(0, 200); }
+      if (process.env.CORPUS_DUMP && id === process.env.CORPUS_DUMP) console.log(out);
+      const p = { kind, id, h: md5(out), t: out.startsWith("THROW:") ? 1 : 0 };
+      probes.push(p);
+      return p;
+    };
+    const you = L.buildMon(getOpponentConfig(yName, { ability: yAb }));
+    const opp = L.buildMon({ ...getOpponentConfig(oName, { ability: oAb }), friendship: 255 });
     const ctx = { you, opp, noLabels: false };
     let state;
-    try { state = L.buildStartState({ you, opp }); } catch (e) { probes.push({ kind: "start", id: `${i}`, h: md5("THROW:" + e.message) }); continue; }
+    try { state = L.buildStartState({ you, opp }); } catch (e) { rec("start", `${i}`, () => { throw e; }); continue; }
     for (let d = 0; d < depth && state.yourHpPct > 0 && state.oppHpPct > 0; d++) {
       const id = `${i}:${yName}|${oName}:t${d + 1}`;
       let dec;
@@ -98,13 +103,25 @@ export async function runCorpus(engineDir, { pairs = 1500, depth = 3, seed = 202
       const yMove = forcedY || pick(yMoves);
       const cands = plans.flatMap((p) => p.cands.map((c) => ({ ...c, qc: p.qc })));
       const oc = forcedO ? { move: forcedO, qc: undefined } : pick(cands);
+      const tid = `${id}:${yMove}/${oc.move}`;
       let res;
-      rec("turn", `${id}:${yMove}/${oc.move}`, () => (res = mergeTurn(L.resolveTurn(ctx, dec, yMove, oc.move, { qc: oc.qc }))),
+      const probe = rec("turn", tid, () => (res = mergeTurn(L.resolveTurn(ctx, dec, yMove, oc.move, { qc: oc.qc }))),
         (ms) => JSON.stringify(ms.map(([p, k]) => [round(p), k])));
+      const u = r(); // always drawn, so record and replay consume the stream alike
       if (!res || res.length === 0) break;
-      state = pick(res)[2];
+      if (!nextOf) {
+        const chosen = res[Math.floor(u * res.length)];
+        probe.next = md5(chosen[1]);
+        state = chosen[2];
+      } else {
+        const want = nextOf.get(tid);
+        const found = want && res.find(([, k]) => md5(k) === want);
+        if (!found) { if (want) lost++; break; }
+        state = found[2];
+      }
     }
   }
+  probes.lost = lost;
   return probes;
 }
 

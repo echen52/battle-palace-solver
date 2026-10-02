@@ -1,48 +1,62 @@
-// The fork must reproduce the Arena engine (04ee03b) on the golden corpus:
-// every AI decision and every resolveTurn result, hashed with the Arena's
-// Mind / Skill fields stripped (tools/corpus.mjs STRIP_KEYS). Changes that
-// deliberately move a probe are listed in INTENDED with the reason; nothing
-// else may move.
+// The fork against the Arena engine (04ee03b) on the golden corpus.
+//
+//  1. COMPAT   every logic.js ARENA_COMPAT flag set: the fork must reproduce the
+//              Arena engine on every probe -- every AI decision and every
+//              resolveTurn, with the fields the fork adds stripped -- and lose
+//              no walk.
+//  2. PALACE   the defaults: the probes that move.
+//  3. ATTRIBUTION  each Palace change alone (its flag cleared, the others set):
+//              the probes IT moves. Every probe moved in (2) must be moved by at
+//              least one change alone -- otherwise it is unexplained and fails.
+//
+// The golden is RECORDED from the Arena engine (tools/corpus.mjs); the fork
+// REPLAYS its walk by successor hash, so extra or different outcomes a Palace
+// change creates do not move the positions under test.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { runCorpus } from "../tools/corpus.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const engine = path.join(here, "../engine");
 const golden = JSON.parse(readFileSync(path.join(here, "golden-arena-04ee03b.json"), "utf8"));
+const L = await import(pathToFileURL(path.join(engine, "logic.js")).href);
+const FLAGS = Object.keys(L.ARENA_COMPAT);
+const setAll = (v) => { for (const k of FLAGS) L.ARENA_COMPAT[k] = v; };
 
-// id -> reason. Each class was attributed by neutralising its fix alone and
-// re-running: the listed probes, and only they, return to the golden hash.
-const PROTECT_RESET = "Cmd_setprotectlike resets protectUses when the last RESULTING move was not " +
-  "Protect/Detect/Endure (src/battle_script_commands.c:6494-6501); the Arena engine never reset it";
-const INTENDED = {
-  "340:Walrein 1|Cloyster 1:t3:Blizzard/Protect": PROTECT_RESET,
-  "439:Porygon2 4|Electrode 1:t3:Psychic/Protect": PROTECT_RESET,
-  "688:Regice 2|Golduck 3:t3:Brick Break/Protect": PROTECT_RESET,
-  "723:Squirtle 1|Cloyster 1:t3:Protect/Protect": PROTECT_RESET,
-  "774:Wailmer 1|Kabuto 1:t3:Rollout/Protect": PROTECT_RESET,
-  "931:Armaldo 1|Arcanine 2:t3:Protect/Crunch": PROTECT_RESET,
-  "958:Forretress 3|Hitmonchan 2:t3:Zap Cannon/Detect": PROTECT_RESET,
-  "967:Hariyama 4|Sceptile 1:t3:Fake Out/Detect": PROTECT_RESET,
-  "1002:Blissey 3|Houndour 1:t3:Fire Blast/Protect": PROTECT_RESET,
-  "1028:Gardevoir 8|Cloyster 1:t3:Psychic/Protect": PROTECT_RESET,
-  "1117:Machamp 1|Salamence 2:t3:Rock Slide/Protect": PROTECT_RESET,
-  "1156:Shelgon 1|Wigglytuff 2:t3:Protect/Fake Tears": PROTECT_RESET,
-  "1190:Togepi 1|Lairon 2:t3:Yawn/Protect": PROTECT_RESET,
-  "1220:Scizor 3|Azumarill 1:t3:Endure/Protect": PROTECT_RESET,
-  "1227:Medicham 2|Relicanth 1:t3:Endure/Water Pulse": PROTECT_RESET,
-  "1421:Relicanth 2|Articuno 3:t3:Amnesia/Protect": PROTECT_RESET,
-};
-
-const probes = await runCorpus(path.join(here, "../engine"));
-let fail = 0, intended = 0;
-if (probes.length !== golden.length) { console.log(`FAIL probe count ${probes.length} != golden ${golden.length}`); process.exit(1); }
-for (let i = 0; i < golden.length; i++) {
-  const g = golden[i], p = probes[i];
-  if (g.id !== p.id || g.kind !== p.kind) { console.log(`FAIL walk diverged at #${i}: ${g.id} vs ${p.id}`); process.exit(1); }
-  if (g.h === p.h) continue;
-  if (INTENDED[g.id]) { intended++; continue; }
-  if (fail++ < 10) console.log(`FAIL ${g.kind} ${g.id}`);
+const byId = new Map(golden.map((g) => [g.id, g]));
+async function movers() {
+  const probes = await runCorpus(engine, { golden });
+  const moved = new Set();
+  let compared = 0;
+  for (const p of probes) {
+    const g = byId.get(p.id);
+    if (!g) continue; // a walk the recording never took (its predecessor moved)
+    compared++;
+    if (g.h !== p.h) moved.add(p.id);
+  }
+  return { moved, compared, lost: probes.lost };
 }
-console.log(`${fail ? "FAIL" : "ok"}  fork equivalence: ${golden.length - fail - intended}/${golden.length} identical, ${intended} intended, ${fail} unexplained`);
+
+let fail = 0;
+setAll(true);
+const compat = await movers();
+const okCompat = compat.moved.size === 0 && compat.lost === 0 && compat.compared === golden.length;
+if (!okCompat) { fail++; console.log(`FAIL compat: ${compat.moved.size} moved, ${compat.lost} lost, ${compat.compared}/${golden.length} compared`); for (const id of [...compat.moved].slice(0, 5)) console.log("   ", id); }
+
+setAll(false);
+const palace = await movers();
+const perFlag = {};
+for (const f of FLAGS) {
+  setAll(true); L.ARENA_COMPAT[f] = false;
+  perFlag[f] = (await movers()).moved;
+}
+setAll(false);
+const explained = new Set(Object.values(perFlag).flatMap((s) => [...s]));
+const unexplained = [...palace.moved].filter((id) => !explained.has(id));
+if (unexplained.length) { fail++; console.log(`FAIL ${unexplained.length} unexplained movers:`); for (const id of unexplained.slice(0, 10)) console.log("   ", id); }
+
+const classes = FLAGS.map((f) => `${f} ${perFlag[f].size}`).join(", ");
+console.log(`${fail ? "FAIL" : "ok"}  fork equivalence: compat ${golden.length - compat.moved.size}/${golden.length} identical (${compat.lost} lost); ` +
+  `palace moves ${palace.moved.size} of ${palace.compared} compared (${palace.lost} walks end early), ${unexplained.length} unexplained [${classes}]`);
 process.exit(fail ? 1 : 0);
