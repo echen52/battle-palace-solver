@@ -1,0 +1,17 @@
+b861d3650753155a4b2f0681491b4a53 *acc-check.js
+d817fdbecb6275c54092689f197942ae *ai-interpreter.js
+6bf9b9a34f6deb203aac471a80fabf87 *ai-program.js
+f7d014b304d6a83bff38d35bffdb0f73 *ai-tables.js
+6e435dd99725843c7402875c7945fa20 *crit-effects.js
+adc2a45bb5925cff72e6b5c2b621da04 *damage-adjust.js
+82dd46291e581a90c59e49ebec1f6129 *frontier-pool.js
+a579a2874f75fb6c044b620dabfee2cb *gender-data.js
+cd7423eac5de6e98b2df8bce07a078d5 *item-data.js
+933ac5ad44de9cf75c977cd7a19b9162 *logic.js
+dc4927df862f17f78fc231c98757eef6 *move-data.js
+a843c4f90b81a71871db1a2ef49363db *move-flags.js
+6adad5e3bdfb39c21e0b879348d85045 *opponent-adapter.js
+2beece3a1d0b5ccd5740c7d2e957610e *species-data.js
+ce7a0798b8b93112d1023dbf95d6960b *species-weights.js
+3c057167ff866ef8b154ec2b4a7ff82d *type-data.js
+54a73aae58dfb12edb8d63243689249c *type-table.js
