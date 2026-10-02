@@ -5103,6 +5103,11 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     youSeeded: false, oppSeeded: false, // Leech Seed — true means THIS side is seeded and drains into the other every end-of-turn
     youMoveHistory: [], // Phase D F2c: BATTLE_HISTORY->usedMoves[player], as the AI has recorded it
     oppMoveHistory: [], // PALACE FORK: BATTLE_HISTORY->usedMoves[opponent], as the player's AI has recorded it
+    // PALACE FORK: gLastResultingMoves -- the move that EXECUTED (a called
+    // move, not the caller), or null for MOVE_NONE / MOVE_UNAVAILABLE
+    // (MOVEEND_UPDATE_LAST_MOVES, src/battle_script_commands.c:4404-4414).
+    // Cmd_setprotectlike reads it (:6498-6501). See protectUsesFor.
+    youLastResultingMove: null, oppLastResultingMove: null,
     youLastMove: null, oppLastMove: null, // gLastMoves[battler] equivalent — set unconditionally whenever that actor acts (src/battle_script_commands.c:4407, gLastMoves[gBattlerAttacker] = gChosenMove), regardless of hit/prevented. Needed by e.g. AI_CV_DefenseUp/AI_CV_SpDefUp's "was I just hit by a physical/special move" check.
     // Substitute: null = no sub. A number = the sub's REMAINING HP pool
     // (starts at floor(maxHP/4), min 1 — src/battle_script_commands.c:7808-7833).
@@ -5315,16 +5320,31 @@ function applyIntimidateOnSwitchIn(base, you, opp) {
 }
 
 function freshTurnDamageTracking(s) {
-  // Destiny Bond cleared here too — same "reset at the top of the turn,
-  // re-armed within the turn if used again" shape as Endure (CANCELER_FLAGS,
-  // src/battle_util.c:2010-2011, clears STATUS2_DESTINY_BOND at the start of
-  // the mon's own next action attempt).
+  // PALACE FORK: Destiny Bond is NO LONGER cleared here. CANCELER_FLAGS
+  // (src/battle_util.c:2010-2011) clears STATUS2_DESTINY_BOND at the start of
+  // the mon's OWN next action attempt -- see clearOwnDestinyBond. Clearing it at
+  // the top of the turn lost the bond whenever the bonded mon moved second the
+  // next turn and was knocked out before it acted.
   return {
     ...s,
     youDamageTaken: null, oppDamageTaken: null, youEndureActive: false, oppEndureActive: false,
     youProtected: false, oppProtected: false,
-    youDestinyBondActive: false, oppDestinyBondActive: false,
   };
+}
+// PALACE FORK: CANCELER_FLAGS, the first case of AtkCanceller_UnableToUseMove
+// (src/battle_util.c:2010-2011), runs on every action that reaches its move's
+// script -- before the sleep, freeze, paralysis or any other check -- and
+// clears the actor's own STATUS2_DESTINY_BOND. A Palace loaf never reaches it.
+function clearOwnDestinyBond(s, actor) {
+  if (s[actor + "DestinyBondActive"]) s[actor + "DestinyBondActive"] = false;
+}
+// PALACE FORK: Cmd_setprotectlike (src/battle_script_commands.c:6494-6501)
+// resets protectUses to 0 when the user's last RESULTING move was not
+// Protect, Detect or Endure, before rolling. The stored counter itself is left
+// stale until then -- which is also what the AI reads (get_protect_count).
+const PROTECT_LIKE = new Set(["Protect", "Detect", "Endure"]);
+function protectUsesFor(lastResultingMove, uses) {
+  return PROTECT_LIKE.has(lastResultingMove) ? uses : 0;
 }
 
 function cloneState(s) {
@@ -7724,7 +7744,9 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   // AI reads gBattleMoves[0xFFFF] (past the table), whose effect / power /
   // type bytes equal row 0's in the ROM -- so "no last move" is exact there
   // too (Phase D F2c, recordTargetMoveHistory).
+  const prevResultingMove = s[isYou ? "youLastResultingMove" : "oppLastResultingMove"]; // read by Protect / Endure below
   s[selfLastMoveKey] = (statusPrevented || attractPrevented || selfHit) ? null : chosenMoveName;
+  s[isYou ? "youLastResultingMove" : "oppLastResultingMove"] = (statusPrevented || attractPrevented || selfHit) ? null : moveName; // PALACE FORK
 
   if (thawed && s[selfStatusKey] === "freeze") s[selfStatusKey] = null;
 
@@ -8041,7 +8063,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const usesKey = isYou ? "youProtectUses" : "oppProtectUses";
     if (endureTriggered) {
       s[isYou ? "youEndureActive" : "oppEndureActive"] = true;
-      s[usesKey] += 1;
+      s[usesKey] = protectUsesFor(prevResultingMove, s[usesKey]) + 1; // PALACE FORK: the reset applies first
       // +1 on success — verified this is genuinely asymmetric with Protect's
       // OWN-use scoring (see below), NOT the same "precedent" as previously
       // assumed. Cmd_setprotectlike sets gProtectStructs[attacker].ENDURED
@@ -8066,7 +8088,7 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     const selfProtectedKey = isYou ? "youProtected" : "oppProtected";
     if (protectTriggered) {
       s[selfProtectedKey] = true;
-      s[usesKey] += 1;
+      s[usesKey] = protectUsesFor(prevResultingMove, s[usesKey]) + 1; // PALACE FORK: the reset applies first
       // No skillKey change — success is genuinely neutral, see above.
     } else {
       s[usesKey] = 0;
@@ -9793,7 +9815,8 @@ function enumerateMoveBody(ctx, state, actor, moveName, moveData, targetCharging
         // the mechanic).
         const usesKey = actor === "you" ? "youProtectUses" : "oppProtectUses";
         const successRates = [1, 0.5, 0.25, 0.125];
-        const rate = isLastToAct ? 0 : successRates[Math.min(state[usesKey], successRates.length - 1)];
+        const uses = protectUsesFor(state[actor === "you" ? "youLastResultingMove" : "oppLastResultingMove"], state[usesKey]); // PALACE FORK
+        const rate = isLastToAct ? 0 : successRates[Math.min(uses, successRates.length - 1)];
         const triggerFlag = moveData.effect === "EFFECT_ENDURE" ? "endureTriggered" : "protectTriggered";
         if (rate > 0) {
           results.push({ p: p * rate, hit: true, selfHit: false, secondaryTriggered: false, statusPrevented: false, thawed: stb.thawed, [triggerFlag]: true });
@@ -10529,6 +10552,7 @@ function applyPalaceLoaf(ctx, s, actor, o) {
   }
   if (o.thawed) s[actor + "Status"] = null;
   s[actor + "LastMove"] = null; // MOVE_UNAVAILABLE
+  s[actor + "LastResultingMove"] = null; // MOVE_UNAVAILABLE
 }
 function describeLoaf(actor, o) {
   const who = actor === "you" ? "You" : "Opp";
@@ -10659,6 +10683,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
     }
     if (!firstLoaf && fo.confTick) applyConfusionTick(s, order[0], fo.confTick);
     const bidePre1 = (s.youLock?.kind === "bide" || s.oppLock?.kind === "bide") ? bideSnapshot(s) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
+    if (!firstLoaf) clearOwnDestinyBond(s, order[0]);
     if (!firstLoaf) applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null);
     if (bidePre1) bideAccumulate(ctx, s, bidePre1);
     const firstLabel = ctx.noLabels ? "" : firstLoaf ? describeLoaf(order[0], fo)
@@ -10706,6 +10731,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       // targets the actor's foe.
       const applyAs = bounced ? order[0] : order[1];
       const bidePre2 = (s2.youLock?.kind === "bide" || s2.oppLock?.kind === "bide") ? bideSnapshot(s2) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
+      if (!secondLoaf) clearOwnDestinyBond(s2, order[1]);
       if (!secondLoaf) applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null);
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)

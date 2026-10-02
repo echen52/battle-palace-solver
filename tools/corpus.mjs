@@ -18,7 +18,7 @@ import path from "node:path";
 export const STRIP_KEYS = new Set(["mindYou", "mindOpp", "skillYou", "skillOpp",
   // Fields the fork ADDS (the player's AI's knowledge of the opponent). The
   // Arena engine has no such state; its absence there is not a difference.
-  "oppAbilityRecord", "oppMoveHistory"]);
+  "oppAbilityRecord", "oppMoveHistory", "youLastResultingMove", "oppLastResultingMove"]);
 // The fork records MOVE_UNAVAILABLE into the AI's move history where the Arena
 // engine recorded nothing (slot occupancy, engine/logic.js
 // recordTargetMoveHistory). Dropped here; the AI probes still compare every
