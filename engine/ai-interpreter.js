@@ -290,8 +290,15 @@ function step(view, th, slot, rolls) {
 const TRAPPERS = [K.ABILITY_SHADOW_TAG, K.ABILITY_MAGNET_PULL, K.ABILITY_ARENA_TRAP];
 
 // Run the three scripts over the four slots; returns [{ p, scores }].
+// BattleAI_SetupAIData (src/battle_ai_script_commands.c:312-342): a slot in
+// defaultScoreMoves starts at 100, any other at 0, and a limited slot is then
+// zeroed. Outside the Palace the mask is every slot (ALL_MOVES_MASK); in the
+// Palace it is the nature roll's group (PALACE FORK: view.palaceMask, from
+// ChooseMoveAndTargetInBattlePalace, src/battle_gfx_sfx_util.c:149-166).
+// Zeroed slots are still scored by the scripts and can still win the pick.
 export function runAi(view, rolls) {
-  let threads = [{ fr: 0, scores: view.mon[U].moves.map((m, i) => (m === 0 ? 0 : view.limited[i] ? 0 : 100)), g: null, p: 1 }];
+  const inMask = (i) => !view.palaceMask || view.palaceMask[i];
+  let threads = [{ fr: 0, scores: view.mon[U].moves.map((m, i) => (m === 0 ? 0 : view.limited[i] ? 0 : inMask(i) ? 100 : 0)), g: null, p: 1 }];
   for (const root of SCRIPTS) {
     for (let slot = 0; slot < 4; slot++) {
       if (view.mon[U].moves[slot] === 0) { for (const t of threads) t.scores[slot] = 0; continue; }

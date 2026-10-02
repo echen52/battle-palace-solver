@@ -4365,7 +4365,7 @@ function aiDecisionState(state, side = "opp") {
   const h = recordTargetMoveHistory(state, target);
   return h === state[key] ? state : { ...state, [key]: h };
 }
-function buildAiView(opp, you, state, { history = "battle", qc = false, debug = null } = {}) {
+function buildAiView(opp, you, state, { history = "battle", qc = false, debug = null, palaceMask = null } = {}) {
   const weather = effectiveWeather(state, you, opp);
   const holders = aiQuickClawHolders(opp, you);
   const INF = Number.MAX_SAFE_INTEGER;
@@ -4393,6 +4393,7 @@ function buildAiView(opp, you, state, { history = "battle", qc = false, debug = 
       itemEffects: 0,
     },
     moveTable: AI_MOVE_TABLE,
+    palaceMask, // PALACE FORK: [4 booleans] or null (see ai-interpreter runAi)
     aiDamage: (slot, roll) => (opp.moves[slot] ? aiCalcDamage(opp, you, opp.moves[slot], aiState, roll) : 0),
     typeEffDamageVar: (moveId) => aiTypeEffDamageVar(moveId, opp, you, state),
     debug,
@@ -10482,7 +10483,65 @@ function resolutionChanged(a, b) {
     || a.weatherType !== b.weatherType; // Forecast reads the weather
 }
 
-function resolveTurn(ctx, state, yourMove, oppMove, { qc } = {}) {
+// ── PALACE FORK: the loafing action ────────────────────────────────────────
+// HandleAction_UseMove (src/battle_util.c:263-283): a battler whose
+// palaceUnableToUseMove is set never reaches its move's script -- so never the
+// attackcanceler, and so none of the canceler chain (no Destiny Bond clear at
+// CANCELER_FLAGS, no sleep / freeze / paralysis / confusion / attraction /
+// flinch checks) and no HITMARKER_OBEYS. Two scripts can run instead:
+//   "escape"  BattleScript_MoveUsedLoafingAround (data/battle_scripts_1.s:
+//             4232-4241): palacetryescapestatus, then the message. Used when
+//             gPalaceSelectionBattleScripts is NULL -- the fallback's 50% loaf,
+//             the no-usable-moves loaf, and a Choice-locked or 0-PP pick.
+//             BattlePalace_TryEscapeStatus (src/battle_util2.c:126-210): a
+//             sleeper's counter ticks exactly as at CANCELER_ASLEEP (Early Bird
+//             2, an uproar wakes it), waking does not act; a frozen mon thaws
+//             on Random() % 5 == 0 and does not act either way.
+//   "plain"   BattleScript_Selecting{Disabled,Tormented,NotAllowedMoveTaunt,
+//             Imprisoned}MoveInPalace (:3368-3372, :3572, :3585, :3658): a
+//             message and moveendto MOVEEND_NEXT_TARGET -- no status escape.
+// Both end in moveend without HITMARKER_OBEYS, so MOVEEND_UPDATE_LAST_MOVES
+// writes MOVE_UNAVAILABLE (src/battle_script_commands.c:4404-4414) and
+// MOVEEND_CHOICE_MOVE locks nothing (:4297).
+function palaceLoafOutcomes(ctx, state, actor, kind) {
+  if (kind !== "escape" && kind !== "plain") throw new Error(`palaceLoafOutcomes: kind "${kind}"`);
+  const mon = actor === "you" ? ctx.you : ctx.opp;
+  const status = state[actor + "Status"];
+  if (kind === "escape" && status === "sleep") {
+    const toSub = mon.ability === "Early Bird" ? 2 : 1;
+    const sleepRemaining = uproarKeepsAwake(state, mon) ? 0 : Math.max(0, state[actor + "SleepTurns"] - toSub);
+    return [{ p: 1, loaf: kind, sleepRemaining, thawed: false }];
+  }
+  if (kind === "escape" && status === "freeze") {
+    return [{ p: 0.2, loaf: kind, sleepRemaining: null, thawed: true }, { p: 0.8, loaf: kind, sleepRemaining: null, thawed: false }];
+  }
+  return [{ p: 1, loaf: kind, sleepRemaining: null, thawed: false }];
+}
+function applyPalaceLoaf(ctx, s, actor, o) {
+  if (o.sleepRemaining !== null) {
+    if (o.sleepRemaining <= 0) {
+      s[actor + "Status"] = null;
+      s[actor + "SleepTurns"] = null;
+      s[actor + "Nightmared"] = false; // both wake paths clear STATUS2_NIGHTMARE
+    } else {
+      s[actor + "SleepTurns"] = o.sleepRemaining;
+    }
+  }
+  if (o.thawed) s[actor + "Status"] = null;
+  s[actor + "LastMove"] = null; // MOVE_UNAVAILABLE
+}
+function describeLoaf(actor, o) {
+  const who = actor === "you" ? "You" : "Opp";
+  const tail = o.sleepRemaining === 0 ? " (woke up)" : o.sleepRemaining ? " (still asleep)" : o.thawed ? " (thawed)" : "";
+  return `${who} loafs (Palace)${tail}`;
+}
+
+// PALACE FORK: `loaf` = { you, opp }, each null or a Palace loaf kind
+// ("escape" | "plain", see palaceLoafOutcomes). A loafing side's move name is
+// still passed: it is the move in the slot the controller returned, which is
+// what the turn order reads (GetWhoStrikesFirst, src/battle_main.c, reads
+// moves[chosenMovePositions]) and what TryClearRageStatuses compares.
+function resolveTurn(ctx, state, yourMove, oppMove, { qc, loaf = null } = {}) {
   // Resolve the overrides ONCE per turn, here, so that every downstream read of
   // mon.ability / mon.item sees the swapped values without any of them knowing
   // the swap exists.
@@ -10521,10 +10580,10 @@ function resolveTurn(ctx, state, yourMove, oppMove, { qc } = {}) {
     return [{ p: 1, order: ySpeed > oSpeed ? ["you", "opp"] : ["opp", "you"] }];
   };
   const runBranches = (branches) => {
-    if (branches.length === 1) return resolveTurnWithOrder(ctx, state, yourMove, oppMove, branches[0].order);
+    if (branches.length === 1) return resolveTurnWithOrder(ctx, state, yourMove, oppMove, branches[0].order, loaf);
     const acc = [];
     for (const b of branches) {
-      for (const r of resolveTurnWithOrder(ctx, state, yourMove, oppMove, b.order)) {
+      for (const r of resolveTurnWithOrder(ctx, state, yourMove, oppMove, b.order, loaf)) {
         acc.push({ ...r, p: r.p * b.p });
       }
     }
@@ -10566,7 +10625,7 @@ function resolveTurn(ctx, state, yourMove, oppMove, { qc } = {}) {
   return out;
 }
 
-function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order) {
+function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null) {
   const { you, opp } = ctx;
   const yourMoveData = battleMoveData(you, yourMove);
   const oppMoveData = battleMoveData(opp, oppMove);
@@ -10588,15 +10647,22 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order) {
   const firstMove = order[0] === "you" ? yourMove : oppMove;
   const firstMoveData = order[0] === "you" ? yourMoveData : oppMoveData;
   const firstTargetCharging = order[0] === "you" ? state.oppCharging : state.youCharging;
-  const firstOutcomes = enumerateActionOutcomes(ctx, state, order[0], firstMove, firstMoveData, firstTargetCharging, false);
+  const firstLoaf = loaf?.[order[0]] ?? null;
+  const firstOutcomes = firstLoaf ? palaceLoafOutcomes(ctx, state, order[0], firstLoaf)
+    : enumerateActionOutcomes(ctx, state, order[0], firstMove, firstMoveData, firstTargetCharging, false);
 
   for (const fo of firstOutcomes) {
     let s = cloneState(state);
-    if (fo.confTick) applyConfusionTick(s, order[0], fo.confTick);
+    if (firstLoaf) {
+      applyPalaceLoaf(ctx, s, order[0], fo);
+      snapHp(ctx, s);
+    }
+    if (!firstLoaf && fo.confTick) applyConfusionTick(s, order[0], fo.confTick);
     const bidePre1 = (s.youLock?.kind === "bide" || s.oppLock?.kind === "bide") ? bideSnapshot(s) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
-    applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null);
+    if (!firstLoaf) applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null);
     if (bidePre1) bideAccumulate(ctx, s, bidePre1);
-    const firstLabel = ctx.noLabels ? "" : describeAction(order[0], firstMove, fo.hit, fo.selfHit, fo.statusPrevented, fo.attractPrevented, fo.hitCount ?? null, fo.calledMove ?? null, fo.cancelReason ?? null);
+    const firstLabel = ctx.noLabels ? "" : firstLoaf ? describeLoaf(order[0], fo)
+      : describeAction(order[0], firstMove, fo.hit, fo.selfHit, fo.statusPrevented, fo.attractPrevented, fo.hitCount ?? null, fo.calledMove ?? null, fo.cancelReason ?? null);
 
     const firstActorHp = order[0] === "you" ? s.yourHpPct : s.oppHpPct;
     const secondActorHp = order[0] === "you" ? s.oppHpPct : s.yourHpPct;
@@ -10616,7 +10682,8 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order) {
     // Cmd_attackcanceler). Only FLAG_MAGIC_COAT_AFFECTED moves bounce, which is
     // a generated flag (move-flags.js), not a hand-kept list.
     let bounced = false;
-    if (s[order[0] === "you" ? "youBouncing" : "oppBouncing"]
+    const secondLoaf = loaf?.[order[1]] ?? null;
+    if (!secondLoaf && s[order[0] === "you" ? "youBouncing" : "oppBouncing"]
         && secondMoveData.power === 0
         && moveFlags(secondMove).magicCoatAffected) {
       bounced = true;
@@ -10624,19 +10691,25 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order) {
     const secondTargetCharging = order[1] === "you" ? s.oppCharging : s.youCharging;
     // B8d: what the first action changed is visible to the second.
     const ctx2 = resolutionChanged(state, s) ? reResolve(ctx, s) : ctx;
-    const secondOutcomes = enumerateActionOutcomes(ctx2, s, order[1], secondMove, secondMoveData, secondTargetCharging, true);
+    const secondOutcomes = secondLoaf ? palaceLoafOutcomes(ctx2, s, order[1], secondLoaf)
+      : enumerateActionOutcomes(ctx2, s, order[1], secondMove, secondMoveData, secondTargetCharging, true);
 
     for (const so of secondOutcomes) {
       let s2 = cloneState(s);
-      if (so.confTick) applyConfusionTick(s2, order[1], so.confTick);
+      if (secondLoaf) {
+        applyPalaceLoaf(ctx2, s2, order[1], so);
+        snapHp(ctx, s2);
+      }
+      if (!secondLoaf && so.confTick) applyConfusionTick(s2, order[1], so.confTick);
       // A bounced move is applied with the BOUNCER as the actor -- which in this
       // engine is exactly "it landed on the original user", since every executor
       // targets the actor's foe.
       const applyAs = bounced ? order[0] : order[1];
       const bidePre2 = (s2.youLock?.kind === "bide" || s2.oppLock?.kind === "bide") ? bideSnapshot(s2) : null; // only while someone is biding: accumulation needs the lock BEFORE the action
-      applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null);
+      if (!secondLoaf) applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null);
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
-      const secondLabel = ctx.noLabels ? "" : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
+      const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
+        : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
       // B8c: Shed Skin's 1/3 is drawn HERE, before the end-of-turn effects,
       // because it acts at their ABILITIES checkpoint -- ahead of the residuals.
       const bothUp = s2.yourHpPct > 0 && s2.oppHpPct > 0;
