@@ -2,8 +2,9 @@
 
 Battle Palace engine (and, next, solver) for Pokémon Emerald. Started
 2026-10-02. **Mechanics, PP (Phase A) and the team layer (Phase B) are done;
-Phase C step 1 (score), the opponent's replacement after a KO and step 2
-(the exact attempt) are done (2026-10-05); next: step 3, Monte Carlo.**
+Phase C steps 1-3 (score, exact attempt, Monte Carlo) and the opponent's
+replacement after a KO are done (2026-10-05). Next: user decisions below
+(damage-roll point estimate; a UI / CLI to run it).**
 
 ## What this is
 
@@ -31,7 +32,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (9/9)
+## Tests — `bash tools/run-suite.sh` (10/10)
 
 | test | what it pins |
 |---|---|
@@ -43,12 +44,18 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-score | 46: Showdown reader on the user's team (`teams/user-test-team.txt`; stats by hand, bad lines throw), every score term on hand-built positions, monWeights, outcome chances on a real turn. 5/5 mutations caught |
 | test-next-in | 37: trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
 | test-solve | 17: exact search vs an unmerged brute force at 2 turns (every lever, worn-down position incl. faints/replacements; real start), a rule-decided fight to completion (1% in permanent sand), the replacement rule (best not first), budget + frontier (finished + open = 1). 5/5 mutations caught. ~11 s |
+| test-montecarlo | 16: estimator algebra + Wilson margins + separation rule; MC vs exact P(KO/lose within 2 turns) within 3 sd; exact-only levers get no rollouts; a worker's batch equals the main thread's digit for digit (next-in live in it); parallel vs single-thread within margins. 6/6 mutations caught. ~45 s |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
 `git checkout -- file` restores the last commit, not the pre-mutation file.
 
 ## Known gaps (stated, not silent)
+
+- DAMAGE ROLL: every battle hit uses the 92.5% point estimate (inherited
+  from the Arena engine, "amendment 15"), not the 16 rolls (85-100). For a
+  solver reporting P(KO) this matters at KO thresholds. Raised with the user
+  2026-10-05 -- decision pending.
 
 - PP (Phase A, 2026-10-02) is modelled: battle + party PP, ppreduce rules,
   Pressure, Struggle, the Palace mask / AI / loaf hooks, Leppa, Spite, Grudge,
@@ -101,6 +108,14 @@ with its probability.
    mon. Optional 2-turn decision version (measure how often it changes advice).
    Speed-ups to build in: sample one outcome per simulated turn instead of
    enumerating (~3–5x), worker threads (~4x), early stopping when separated.
+   BUILT 2026-10-05: engine/montecarlo.js (+ -parallel.js, mc-worker.js).
+   Exact turn 1 per lever, rollouts from its frontier (enumerate-then-draw:
+   true one-outcome sampling would need branching rewritten across the
+   11k-line engine -- not needed: 5-27 ms/game, 16 cores, 12 workers).
+   Measured, user's team x 8 leads x 3 own leads (challenge 8): 22/24
+   separate in median ~5.7 s, max 20 s; 2 near-ties (gap < 0.01) hit the
+   30 s budget -> report those as "too close to call". Tyranitar 1 is
+   open-level only (index 860), so its next-in hook is off.
 
 Measured cost (stay policy, full enumeration then sample, 100 games):
 Snorlax/Starmie 24 ms/game (12 turns), Metagross/Salamence 44 ms (5),
