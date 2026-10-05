@@ -2,8 +2,8 @@
 
 Battle Palace engine (and, next, solver) for Pokémon Emerald. Started
 2026-10-02. **Mechanics, PP (Phase A) and the team layer (Phase B) are done;
-Phase C step 1 (score) and the opponent's replacement after a KO are done
-(2026-10-05); next: step 2, the exact attempt.**
+Phase C step 1 (score), the opponent's replacement after a KO and step 2
+(the exact attempt) are done (2026-10-05); next: step 3, Monte Carlo.**
 
 ## What this is
 
@@ -31,7 +31,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (8/8)
+## Tests — `bash tools/run-suite.sh` (9/9)
 
 | test | what it pins |
 |---|---|
@@ -42,6 +42,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-team | 33: classification, carried vs left-behind fields, Toxic/sleep on return, Spikes 1/8 1/6 1/4, Intimidate / Sand Stream / Truant on entry, switch order, Pursuit x2, Roar 50/50 and its blocks, Baton Pass, faint/replace/lose, end of turn after a KO, Perish switch; 300+ random team turns sum to 1 |
 | test-score | 46: Showdown reader on the user's team (`teams/user-test-team.txt`; stats by hand, bad lines throw), every score term on hand-built positions, monWeights, outcome chances on a real turn. 5/5 mutations caught |
 | test-next-in | 37: trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
+| test-solve | 17: exact search vs an unmerged brute force at 2 turns (every lever, worn-down position incl. faints/replacements; real start), a rule-decided fight to completion (1% in permanent sand), the replacement rule (best not first), budget + frontier (finished + open = 1). 5/5 mutations caught. ~11 s |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -84,7 +85,17 @@ with its probability.
    Cases the user wants covered: boosting setups, draining the opponent's
    key-move PP, and the "no good switch vs a strong opponent" case.
 2. **Exact attempt** within a ~2 s budget (positions grow x20–50/turn, so only
-   short fights finish exactly).
+   short fights finish exactly). BUILT 2026-10-05: engine/solve.js. MEASURED
+   with the user's team vs 8 Frontier leads: distinct positions grow 50-100x a
+   turn (exact HP values from damage rolls do not merge), ~3-8 ms per
+   position (teamTurn 300-800 outcomes on turn 1), so 2 s covers ~2 turns and
+   0/8 real fights complete; even a worn-down fight did not finish in 60 s
+   (Rest / Substitute / miss / loaf tails). So in practice step 2 is the
+   exactly enumerated first turn(s) and step 3 does the rest, from the
+   frontier solveAction returns. Replacement rule (shared with MC): the bench
+   mon with the best one-turn lookahead score -- it tends to SACRIFICE a worn
+   mon to take the hit (Latios at 5%, even frozen, beats a full Swampert:
+   ~0.3 at risk vs 1.25).
 3. **Otherwise Monte Carlo** from the exactly enumerated root outcomes, with
    margins of error. Rollout policy: stay; after a faint send the best-scoring
    mon. Optional 2-turn decision version (measure how often it changes advice).
