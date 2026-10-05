@@ -139,8 +139,14 @@ const meanOpp = (rs) => rs.reduce((a, r) => a + r.p * r.state.oppHpPct, 0);
   const seed = 11, n = 25;
   const rand = M.rng(seed), sample = M.frontierSampler(root), mine = M.newTally();
   for (let i = 0; i < n; i++) M.addTo(mine, M.rollout(tx, sample(rand()), rand, {}));
-  const w = new Worker(new URL(E("mc-worker.js")), { workerData: { team, opp, exactRoll: true, nextInSpec: null, nextInWarm: null, weights: undefined, frontiers: [root.frontier] } });
-  const theirs = await new Promise((res, rej) => { w.on("message", (m) => res(m.tally)); w.on("error", rej); w.postMessage({ lever: 0, n, seed }); });
+  const w = new Worker(new URL(E("mc-worker.js")));
+  const theirs = await new Promise((res, rej) => {
+    w.on("message", (m) => (m.type === "batch" ? res(m.tally) : rej(new Error(m.error))));
+    w.on("error", rej);
+    w.postMessage({ type: "init", team, opp, exactRoll: true, nextInSpec: null, weights: undefined, start: start });
+    w.postMessage({ type: "frontiers", frontiers: [root.frontier], firstActions: ["stay"] });
+    w.postMessage({ type: "batch", lever: 0, n, seed });
+  });
   await w.terminate();
   ok(JSON.stringify(theirs) === JSON.stringify(mine), "a worker draws the same rolls as the main thread");
   const r = await MP.solveFight(tctx, start, { budgetMs: 15000, workers: 4 });

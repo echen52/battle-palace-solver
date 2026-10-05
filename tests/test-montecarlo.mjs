@@ -96,8 +96,14 @@ const start = T.teamStart(tctx, 0);
   const seed = 99, n = 30;
   const rand = M.rng(seed), sample = M.frontierSampler(root), mine = M.newTally();
   for (let i = 0; i < n; i++) M.addTo(mine, M.rollout(tn, sample(rand()), rand, {}));
-  const w = new Worker(new URL(E("mc-worker.js")), { workerData: { team, opp, nextInSpec: nextIn.spec, weights: undefined, frontiers: [root.frontier] } });
-  const theirs = await new Promise((res, rej) => { w.on("message", (m) => res(m.tally)); w.on("error", rej); w.postMessage({ lever: 0, n, seed }); });
+  const w = new Worker(new URL(E("mc-worker.js")));
+  const theirs = await new Promise((res, rej) => {
+    w.on("message", (m) => (m.type === "batch" ? res(m.tally) : rej(new Error(m.error))));
+    w.on("error", rej);
+    w.postMessage({ type: "init", team, opp, nextInSpec: nextIn.spec, weights: undefined, start: start });
+    w.postMessage({ type: "frontiers", frontiers: [root.frontier], firstActions: ["stay"] });
+    w.postMessage({ type: "batch", lever: 0, n, seed });
+  });
   await w.terminate();
   ok(JSON.stringify(theirs) === JSON.stringify(mine), `a worker's batch equals the main thread's, digit for digit (sum ${mine.sum.toFixed(6)}, ${mine.ko} KOs)`);
   // ...and the next-in hook is live in it: without it the same rollouts score higher.
@@ -114,6 +120,25 @@ const start = T.teamStart(tctx, 0);
   const s = M.solveMC(tctx, start, { budgetMs: 20000, seed: 3 });
   const agree = r.levers.every((l, i) => Math.abs(l.score - s.levers[i].score) <= l.margin + s.levers[i].margin);
   ok(agree, `parallel and single-thread agree within margins (${r.levers.map((l, i) => `${l.score.toFixed(3)}/${s.levers[i].score.toFixed(3)}`).join(", ")})`);
+}
+
+// ── the shared core: a mixed start, progress, stop ─────────────────────────
+{
+  const C = await import(E("solve-core.js"));
+  // Two start positions (the opponent at 100% or 50%), half each: the merged
+  // root is the weighted sum of the two roots.
+  const a = { ...start }, b = { ...start, oppHpPct: 50 };
+  const ra = X.solveAction(tctx, a, "stay", { budgetMs: 1e9, maxTurns: 1, deferReplace: true });
+  const rb = X.solveAction(tctx, b, "stay", { budgetMs: 1e9, maxTurns: 1, deferReplace: true });
+  const m = C.mergeRoots([{ p: 0.5, root: ra }, { p: 0.5, root: rb }]);
+  ok(near(m.pKO, (ra.pKO + rb.pKO) / 2) && near(m.score, (ra.score + rb.score) / 2) && near(m.open, (ra.open + rb.open) / 2)
+    && m.frontier.length === ra.frontier.length + rb.frontier.length && near(m.frontier.reduce((x, f) => x + f.p, 0), m.open), "mergeRoots: weighted sums and a weighted frontier");
+  let calls = 0, sawLevers = 0;
+  const ctrl = new AbortController();
+  const r = await MP.solveMCParallel(tctx, [{ p: 0.5, state: a }, { p: 0.5, state: b }], { budgetMs: 60000, workers: 3,
+    onProgress: (levers, info) => { calls++; sawLevers = levers.length; if (calls === 6) ctrl.abort(); }, signal: ctrl.signal });
+  ok(r.stoppedBy === "stopped" && calls >= 6 && sawLevers === 3, `a mixed start runs; progress reported (${calls} calls); stop() stops it (${r.stoppedBy})`);
+  ok(r.levers.every((l) => near(l.pKO + l.pOppLeft + l.pLose + l.pCapped, 1, 1e-9)), "...and its chances still sum to 1");
 }
 
 console.log(`test-montecarlo: ${pass}/${pass + fail}`);
