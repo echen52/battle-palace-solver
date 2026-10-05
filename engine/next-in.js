@@ -313,12 +313,37 @@ export function shareOf(table, curHp) {
 //   challenge + battle, or trainerId
 // `warm`: a previous instance's exportCache() (plain data, crosses threads),
 // so worker threads skip the ~1-2 s of building replacement odds and tables.
-export function makeNextIn({ lead, challenge, battle, trainerId } = {}, warm = null) {
+//
+// second: when you are fighting the opponent's SECOND mon, its pool key. Then
+// only one teammate is left and it is the replacement whoever you have out;
+// its distribution is the pairs (lead, second, third) the draw allows, the
+// third's weight summed over both slot orders. Stated limit: which mon came
+// in second also tells something about the third (GetMostSuitable chose it
+// over the third against your mon at the time) -- that evidence is not used.
+// (Fighting the THIRD mon: no replacement; do not build a next-in.)
+export function makeNextIn({ lead, second = null, challenge, battle, trainerId } = {}, warm = null) {
   const e = FRONTIER_POOL[lead];
   if (!e) throw new Error(`next-in: no frontier set named "${lead}"`);
+  const e2 = second != null ? FRONTIER_POOL[second] : null;
+  if (second != null && !e2) throw new Error(`next-in: no frontier set named "${second}"`);
   const dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
+  let thirdDist = null;
+  if (e2) {
+    const m = new Map();
+    for (const d of dist) {
+      const i = d.slots.indexOf(e2.index);
+      if (i < 0) continue;
+      const third = d.slots[1 - i], k = `${third}|${d.ivs}`;
+      const cur = m.get(k);
+      if (cur) cur.p += d.p; else m.set(k, { p: d.p, id: third, ivs: d.ivs, by: { last: 0 } });
+    }
+    const total = [...m.values()].reduce((a, x) => a + x.p, 0);
+    if (total === 0) throw new Error(`next-in: ${second} cannot be ${lead}'s teammate in this bracket`);
+    thirdDist = [...m.values()].map((x) => ({ ...x, p: x.p / total, by: { last: x.p / total } })).sort((a, b) => b.p - a.p);
+  }
   const replCache = new Map(warm?.repl ?? []), tableCache = new Map(warm?.tables ?? []);
   function replacements(you, fainted) {
+    if (thirdDist) return thirdDist;
     const k = `${you.types}|${you.ability}|${you.foresighted}|${fainted.types}`;
     if (!replCache.has(k)) replCache.set(k, replacementDist(dist, you, fainted));
     return replCache.get(k);
@@ -327,7 +352,7 @@ export function makeNextIn({ lead, challenge, battle, trainerId } = {}, warm = n
     const eff = L.effectiveCtx({ you: team[s.youActive], opp }, s);
     const you = { types: eff.you.types, ability: eff.you.ability, foresighted: !!s.youForesighted };
     const reps = replacements(you, { types: eff.opp.types });
-    const k = [s.youActive, eff.you.types, eff.you.ability, eff.you.stats.def, eff.you.stats.spd, s.youStages.def, s.youStages.spd,
+    const k = [second ?? "", s.youActive, eff.you.types, eff.you.ability, eff.you.stats.def, eff.you.stats.spd, s.youStages.def, s.youStages.spd,
       s.youReflectTurns != null, s.youLightScreenTurns != null, s.weatherType, s.youStatus, !!s.youForesighted].join("|");
     let tables = tableCache.get(k);
     if (!tables) {
@@ -340,5 +365,5 @@ export function makeNextIn({ lead, challenge, battle, trainerId } = {}, warm = n
     return share;
   }
   const exportCache = () => ({ dist, repl: [...replCache], tables: [...tableCache] });
-  return { spec: { lead, challenge, battle, trainerId }, lead, leadId: e.index, dist, replacements, expectedHitShare, exportCache };
+  return { spec: { lead, second, challenge, battle, trainerId }, lead, leadId: e.index, dist, replacements, expectedHitShare, exportCache };
 }

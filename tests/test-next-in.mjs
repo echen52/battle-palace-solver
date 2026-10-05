@@ -176,5 +176,28 @@ const team = SD.buildTeam(fs.readFileSync(path.join(here, "../teams/user-test-te
   ok(vs(0)[0].id !== vs(2)[0].id, "...and a different one vs Metagross");
 }
 
+// ── fighting the opponent's second mon ─────────────────────────────────────
+{
+  const opp = L.buildMon(getOpponentConfig("Salamence 1", { ability: "Intimidate", ivTier: 12 }));
+  const first = N.makeNextIn({ lead: "Salamence 1", challenge: 3, battle: 7 });
+  const vsMeta = first.replacements({ types: team[0].types, ability: team[0].ability, foresighted: false }, { types: opp.types });
+  const secondKey = N.poolEntry(vsMeta[0].id).key; // e.g. the likeliest one to come in second
+  const ni = N.makeNextIn({ lead: "Salamence 1", second: secondKey, challenge: 3, battle: 7 });
+  const r0 = ni.replacements({ types: team[0].types, ability: team[0].ability, foresighted: false }, { types: ["Normal"] });
+  const r2 = ni.replacements({ types: team[2].types, ability: team[2].ability, foresighted: false }, { types: ["Fire"] });
+  ok(near(r0.reduce((a, r) => a + r.p, 0), 1) && r0 === r2, `second = ${secondKey}: one third-mon distribution, whoever you have out (${r0.length} candidates)`);
+  const sp = (id) => N.poolEntry(id).species, it = (id) => N.poolEntry(id).item;
+  ok(r0.every((r) => sp(r.id) !== "Salamence" && sp(r.id) !== sp(N.poolEntry(vsMeta[0].id).index)
+    && !(it(r.id) && (it(r.id) === it(N.poolEntry(vsMeta[0].id).index) || it(r.id) === P["Salamence 1"].item))), "the third repeats neither species nor item");
+  // Its weight, by hand from the pairs: both slot orders summed.
+  const dist = N.teammateDist(N.trainerPrior({ challenge: 3, battle: 7 }), id("Salamence 1"));
+  const s2 = id(secondKey), with2 = dist.filter((d) => d.slots.includes(s2));
+  const tot = with2.reduce((a, d) => a + d.p, 0);
+  const top = r0[0];
+  const byHand = with2.filter((d) => d.slots.includes(top.id) && d.ivs === top.ivs).reduce((a, d) => a + d.p, 0) / tot;
+  ok(near(top.p, byHand), `the likeliest third (${N.poolEntry(top.id).key}) at ${(100 * top.p).toFixed(1)}%, as summed by hand`);
+  ok(throws(() => N.makeNextIn({ lead: "Salamence 1", second: "Sunkern 1", challenge: 3, battle: 7 }), /cannot be/), "an impossible second throws");
+}
+
 console.log(`test-next-in: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
