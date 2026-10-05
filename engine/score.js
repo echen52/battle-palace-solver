@@ -14,8 +14,8 @@
 //             + boost * (sum of its stat stages, all 7, negative ones count)
 //             - lowHp when the Palace low-HP check holds (it would start the
 //               next fight on the low-HP nature row)
-//             - carry-over volatiles (confusion, Leech Seed, Curse, Perish
-//               Song): 0 by default, PROPOSED values not yet agreed
+//             - carry-over volatiles: confusion 0.05, Leech Seed 0.05,
+//               Curse 0.10, a Perish Song count 0.30 (user OK 2026-10-05)
 // The field:  + spikes per layer on the opponent's side
 //             + screen per remaining turn of your Reflect / Light Screen
 //             + koBonus when the outcome is "win"
@@ -33,7 +33,7 @@ export const DEFAULT_WEIGHTS = Object.freeze({
   itemLost: 0.05,
   boost: 0.05,
   lowHp: 0.05,
-  carry: Object.freeze({ confused: 0, seeded: 0, cursed: 0, perish: 0 }),
+  carry: Object.freeze({ confused: 0.05, seeded: 0.05, cursed: 0.10, perish: 0.30 }),
   spikes: 0.05,
   screen: 0.01,
   koBonus: 0,

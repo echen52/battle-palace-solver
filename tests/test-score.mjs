@@ -74,8 +74,10 @@ const sc = (s, o = null, w) => S.scoreState(tctx, s, o, w).score;
   ok(near(sc({ ...start, youBerryConsumed: true, youItemOverride: null }), (D - 0.05) / D), "an item used up: -0.05");
   ok(near(sc(bench(1, { berryConsumed: true })), (D - 0.05) / D), "Latios's Lum Berry used: -0.05");
   ok(near(sc({ ...start, youPartyPP: [8, 16, 24, 32] }), (D - 0.10 * 8 / 88) / D), "8 of 88 PP spent: -0.10 * 8/88");
-  ok(near(sc({ ...start, youConfused: true, youPerishCount: 2 }), 1), "carry-over volatiles cost 0 by default");
-  ok(near(sc({ ...start, youConfused: true, youPerishCount: 2 }, null, { carry: { ...W.carry, confused: 0.05, perish: 0.5 } }), (D - 0.55) / D), "...and their weights work when set");
+  ok(near(sc({ ...start, youConfused: true, youPerishCount: 2 }), (D - 0.35) / D), "confused + Perish count on the active mon: -0.05 -0.30");
+  ok(near(sc({ ...start, youSeeded: true, youCursed: true }), (D - 0.15) / D), "Leech Seed + Curse: -0.05 -0.10");
+  ok(near(sc({ ...start, youConfused: true, youPerishCount: 2 }, null, { carry: { ...W.carry, confused: 0, perish: 0 } }), 1), "...and their weights can be turned off");
+  ok(near(sc({ ...bench(1, { hpPct: 50 }), youConfused: true, youStages: { ...start.youStages, atk: 1 }, oppSpikesLayers: 0 }), (D - 0.5 - 0.05 + 0.05) / D), "carry-over is read off the active mon only");
   // Unequal weights: Metagross counts double. An untouched team is still 1.0.
   const mw = { monWeights: [2, 1, 1] };
   ok(near(sc(start, null, mw), 1), "monWeights: an untouched team is still 1.0");
