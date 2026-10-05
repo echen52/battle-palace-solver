@@ -92,8 +92,8 @@ function canJoin(id, chosen) {
   return true;
 }
 
-// [{ p, trainerId, ivs, slots: [slot1Id, slot2Id] }] given the lead's frontier
-// mon id, summing to 1. Throws when no trainer in the prior can lead with it.
+// [{ p, ivs, slots: [slot1Id, slot2Id] }] given the lead's frontier mon id,
+// summing to 1 (pairs from different trainers at the same IVs merged). Throws when no trainer in the prior can lead with it.
 export function teammateDist(prior, leadId) {
   const raw = [];
   for (const { id: tid, p: pt } of prior) {
@@ -110,7 +110,15 @@ export function teammateDist(prior, leadId) {
   }
   const total = raw.reduce((x, r) => x + r.p, 0);
   if (total === 0) throw new Error(`next-in: no trainer in this bracket can lead with ${POOL_BY_ID[leadId]?.key ?? leadId}`);
-  return raw.map((r) => ({ ...r, p: r.p / total, ivs: fixedIvs(r.trainerId) }));
+  // Merge what the replacement cannot tell apart: the same ordered pair at the
+  // same IVs from different trainers (only the IVs carry the trainer).
+  const merged = new Map();
+  for (const r of raw) {
+    const ivs = fixedIvs(r.trainerId), k = `${r.slots}|${ivs}`;
+    const cur = merged.get(k);
+    if (cur) cur.p += r.p / total; else merged.set(k, { p: r.p / total, slots: r.slots, ivs });
+  }
+  return [...merged.values()];
 }
 
 // ── 2. GetMostSuitableMonToSwitchInto ──────────────────────────────────────
@@ -303,11 +311,13 @@ export function shareOf(table, curHp) {
 // over who comes in, of its best hit's share of your active mon's current HP.
 //   lead: the FRONTIER_POOL key of the mon you are fighting ("Salamence 1")
 //   challenge + battle, or trainerId
-export function makeNextIn({ lead, challenge, battle, trainerId } = {}) {
+// `warm`: a previous instance's exportCache() (plain data, crosses threads),
+// so worker threads skip the ~1-2 s of building replacement odds and tables.
+export function makeNextIn({ lead, challenge, battle, trainerId } = {}, warm = null) {
   const e = FRONTIER_POOL[lead];
   if (!e) throw new Error(`next-in: no frontier set named "${lead}"`);
-  const dist = teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
-  const replCache = new Map(), tableCache = new Map();
+  const dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
+  const replCache = new Map(warm?.repl ?? []), tableCache = new Map(warm?.tables ?? []);
   function replacements(you, fainted) {
     const k = `${you.types}|${you.ability}|${you.foresighted}|${fainted.types}`;
     if (!replCache.has(k)) replCache.set(k, replacementDist(dist, you, fainted));
@@ -329,5 +339,6 @@ export function makeNextIn({ lead, challenge, battle, trainerId } = {}) {
     for (const r of tables) for (const f of r.forms) share += r.p * f.p * shareOf(f.table, curHp);
     return share;
   }
-  return { lead, leadId: e.index, dist, replacements, expectedHitShare };
+  const exportCache = () => ({ dist, repl: [...replCache], tables: [...tableCache] });
+  return { spec: { lead, challenge, battle, trainerId }, lead, leadId: e.index, dist, replacements, expectedHitShare, exportCache };
 }
