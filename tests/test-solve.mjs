@@ -78,6 +78,9 @@ const same = (ex, bf) => near(ex.score, bf.score) && near(ex.pKO, bf.pKO) && nea
   const vals = T.aliveBench(s).map((k) => [k, val(k)]);
   const bestV = Math.max(...vals.map((v) => v[1]));
   ok(j === vals.find((v) => v[1] === bestV)[0], `the replacement is the best next turn (${vals.map((v) => `${team[v[0]].species} ${v[1].toFixed(4)}`).join(", ")})`);
+  // Latios (the first bench slot) at 5%: Swampert's next turn is better.
+  const weak = { ...s, youBench: s.youBench.map((e, i) => (i === 1 ? { ...e, hpPct: 5 } : e)) };
+  ok(X.chooseReplacement(tctx, weak) === 2, "not simply the first: Latios at 5% -> Swampert");
   const one = { ...s, youBench: s.youBench.map((e, i) => (i === 1 ? { ...e, hpPct: 0 } : e)) };
   ok(X.chooseReplacement(tctx, one) === 2, "one mon left: that one");
   const cache = new Map();
