@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Battle Palace Solver</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="app-header">
+  <h1>Battle Palace Solver</h1>
+  <span class="app-sub">Stay or switch against the Pokémon in front of you</span>
+</header>
+
+<main class="layout">
+
+  <!-- ───────────────────────── YOUR TEAM ───────────────────────── -->
+  <section class="panel" id="teamPanel" aria-label="Your team">
+    <h2>Your team</h2>
+    <div class="field-row">
+      <label for="savedTeams">Saved</label>
+      <select id="savedTeams"><option value="">— Select a saved team —</option></select>
+      <button id="deleteTeam" class="btn btn-small" title="Delete the selected saved team">✕</button>
+    </div>
+    <textarea id="teamText" placeholder="Paste your team (Showdown export, up to 3 Pokémon)"></textarea>
+    <div class="btn-row">
+      <button id="parseTeam" class="btn btn-primary">Use team</button>
+      <input type="text" id="teamName" placeholder="Name to save as" />
+      <button id="saveTeam" class="btn">Save</button>
+    </div>
+    <div id="teamError" class="error-display"></div>
+
+    <div id="monCards"></div>
+
+    <div id="activeBlock" class="active-block" hidden>
+      <h3>Out now: <span id="activeName"></span></h3>
+      <div class="field-row">
+        <label title="Leave all at 0 at the start of a battle: switch-in effects such as Intimidate are applied for you.">Stages</label>
+        <div class="stage-grid" id="youStages"></div>
+      </div>
+      <div class="field-row">
+        <label for="youConfused">Confused</label>
+        <select id="youConfused" class="trigger">
+          <option value="0">No</option>
+          <option value="1">Yes, no turns yet</option>
+          <option value="2">Yes, 1 turn</option>
+          <option value="3">Yes, 2 turns</option>
+          <option value="4">Yes, 3 turns</option>
+          <option value="5">Yes, 4 turns (ends next check)</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label for="youSub" title="Substitute's remaining HP as % of your mon's max HP (a fresh one is 25%). 0 = none.">Substitute %</label>
+        <input type="number" id="youSub" class="trigger" value="0" min="0" max="25" />
+      </div>
+      <div class="field-row">
+        <label for="youLowHp" title="The Palace switches a mon to its low-HP behaviour once it is at half HP or less at a turn's start, and it stays that way until it leaves the field, even if healed. Auto reads it from the HP entered.">Low-HP mode</label>
+        <select id="youLowHp" class="trigger">
+          <option value="auto">Auto (from HP)</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── BATTLE + RECOMMENDATION ───────────────────────── -->
+  <section class="panel" id="battlePanel" aria-label="Battle">
+    <h2>Battle</h2>
+    <div class="field-row">
+      <label for="challenge" title="Challenge 1 is battles 1-7 of your streak, challenge 2 battles 8-14, and so on. It decides which trainers (and so which teammates) you can meet.">Challenge</label>
+      <select id="challenge" class="trigger"></select>
+      <label for="battle" class="inline-label">Battle</label>
+      <select id="battle" class="trigger"></select>
+    </div>
+    <div class="field-row">
+      <label>Their Pokémon</label>
+      <span class="seg">
+        <input type="radio" name="oppIndex" value="1" id="oppIdx1" class="trigger" checked /><label for="oppIdx1" class="btn">1st</label>
+        <input type="radio" name="oppIndex" value="2" id="oppIdx2" class="trigger" /><label for="oppIdx2" class="btn">2nd</label>
+        <input type="radio" name="oppIndex" value="3" id="oppIdx3" class="trigger" /><label for="oppIdx3" class="btn">3rd</label>
+      </span>
+    </div>
+    <div class="field-row" id="leadRow" hidden>
+      <label for="leadSet" title="Their first Pokémon: with it, the last one they can send is narrowed down.">Their 1st was</label>
+      <input type="text" id="leadSet" class="trigger set-input" list="setList" placeholder="Type to search sets…" autocomplete="off" />
+    </div>
+
+    <h3>Field</h3>
+    <div class="field-row">
+      <label for="weather">Weather</label>
+      <select id="weather" class="trigger">
+        <option value="">None</option>
+        <option value="sun">Sun</option>
+        <option value="rain">Rain</option>
+        <option value="sandstorm">Sandstorm</option>
+        <option value="hail">Hail</option>
+      </select>
+      <select id="weatherTurns" class="trigger" title="From an ability (Drizzle, Sand Stream...) weather never ends; from a move it lasts 5 turns.">
+        <option value="">From an ability</option>
+        <option value="5">5 turns left</option>
+        <option value="4">4 turns left</option>
+        <option value="3">3 turns left</option>
+        <option value="2">2 turns left</option>
+        <option value="1">1 turn left</option>
+      </select>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="col-title">Your side</div>
+        <div id="youSide"></div>
+      </div>
+      <div>
+        <div class="col-title">Their side</div>
+        <div id="oppSide"></div>
+      </div>
+    </div>
+
+    <h3>Solve</h3>
+    <div class="field-row">
+      <label for="budget" title="The solver stops early once one choice is clearly best.">Time limit</label>
+      <select id="budget">
+        <option value="10000">10 s</option>
+        <option value="30000" selected>30 s</option>
+        <option value="60000">60 s</option>
+        <option value="120000">2 min</option>
+      </select>
+      <button id="solveBtn" class="btn btn-primary">Solve</button>
+      <button id="stopBtn" class="btn" disabled>Stop</button>
+    </div>
+
+    <div class="results-block">
+      <div id="verdict" class="best-move">—</div>
+      <div id="progress" class="progress"></div>
+      <table class="options-table" id="optionsTable">
+        <thead><tr>
+          <th>Choice</th>
+          <th title="Expected team score after this fight: 1.0 = your whole team untouched, 0 = you lose. ± is the 95% range.">Score</th>
+          <th title="Chance you knock this Pokémon out">KO</th>
+          <th title="Chance it leaves without fainting (Roar, Baton Pass, Perish Song)">Leaves</th>
+          <th title="Chance your whole team faints">You lose</th>
+          <th title="Average turns until the fight ends">Turns</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="notes" class="notes"></div>
+      <div id="solveError" class="error-display"></div>
+    </div>
+
+    <h3>This turn</h3>
+    <div class="two-col">
+      <div><div class="col-title">You</div><div id="youChoices" class="choice-bars"></div></div>
+      <div><div class="col-title">Them</div><div id="oppChoices" class="choice-bars"></div></div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── OPPONENT ───────────────────────── -->
+  <section class="panel" id="oppPanel" aria-label="Opponent">
+    <h2>Opponent</h2>
+    <div class="field-row">
+      <label for="oppSet">Set</label>
+      <input type="text" id="oppSet" class="trigger set-input" list="setList" placeholder="Type to search sets…" autocomplete="off" />
+    </div>
+    <div class="field-row">
+      <input type="checkbox" id="bracketOnly" class="trigger" checked /><label for="bracketOnly" class="chk-label">Only sets this challenge can have</label>
+    </div>
+    <datalist id="setList"></datalist>
+    <div id="oppCard" class="set-card" hidden></div>
+    <div class="field-row" id="oppAbilityRow" hidden>
+      <label for="oppAbility">Ability</label>
+      <select id="oppAbility" class="trigger"></select>
+    </div>
+    <div class="field-row" id="oppIvRow" hidden>
+      <label for="oppIv" title="Every Frontier trainer gives all its Pokémon one IV value; which trainer you met decides it.">IVs</label>
+      <select id="oppIv" class="trigger"></select>
+    </div>
+
+    <div class="field-row">
+      <label for="oppHp">HP %</label>
+      <input type="number" id="oppHp" class="trigger" value="100" min="1" max="100" />
+      <span class="hp-abs" id="oppHpAbs"></span>
+    </div>
+    <div id="oppStatusRows"></div>
+    <div class="field-row">
+      <label title="Leave all at 0 at the start: switch-in effects are applied for you.">Stages</label>
+      <div class="stage-grid" id="oppStages"></div>
+    </div>
+    <div class="field-row">
+      <label for="oppConfused">Confused</label>
+      <select id="oppConfused" class="trigger">
+        <option value="0">No</option>
+        <option value="1">Yes, no turns yet</option>
+        <option value="2">Yes, 1 turn</option>
+        <option value="3">Yes, 2 turns</option>
+        <option value="4">Yes, 3 turns</option>
+        <option value="5">Yes, 4 turns (ends next check)</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <input type="checkbox" id="oppItemGone" class="trigger" /><label for="oppItemGone" class="chk-label">Item used up</label>
+    </div>
+    <div class="field-row">
+      <input type="checkbox" id="oppFirstTurn" class="trigger" checked /><label for="oppFirstTurn" class="chk-label" title="It was just sent out this turn. Its AI treats a first turn differently (Fake Out, for one).">First turn on the field</label>
+    </div>
+    <div class="field-row">
+      <label for="oppLowHp" title="Its Palace low-HP behaviour; Auto reads it from the HP entered.">Low-HP mode</label>
+      <select id="oppLowHp" class="trigger">
+        <option value="auto">Auto (from HP)</option>
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

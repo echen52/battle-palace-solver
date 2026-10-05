@@ -1,0 +1,105 @@
+/* Battle Palace Solver — the Palace family's look (dark, monospace, cyan;
+   tokens from the Battle Palace Assistant / Palace Predictor), laid out like
+   the Battle Arena solver: your side, the battle, the opponent. */
+
+:root {
+  --bg: #1c1c1c;
+  --panel: #2a2a2a;
+  --surface: #3d3d3d;
+  --border: #3d3d3d;
+  --text: #eee;
+  --muted: #888;
+  --accent: #00d9ff;
+  --best: #60c880;
+  --tie: #e0c060;
+  --error: #ff6b6b;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; } /* rows are display:flex; hidden must still hide */
+body { font-family: monospace; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.app-header { border-bottom: 2px solid var(--border); padding: 14px 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.app-header h1 { font-size: 1.25rem; }
+.app-sub { color: var(--muted); font-size: 12px; }
+
+.layout { display: grid; grid-template-columns: 330px minmax(380px, 1fr) 320px; gap: 16px; max-width: 1280px; margin: 0 auto; padding: 16px 20px 48px; align-items: start; }
+@media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
+
+.panel { background: var(--panel); border: 2px solid var(--border); padding: 12px; }
+.panel h2 { font-size: 1rem; margin-bottom: 10px; color: var(--accent); }
+.panel h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 6px; }
+.panel h3 span { color: var(--text); text-transform: none; letter-spacing: 0; }
+
+.field-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.field-row > label { color: var(--muted); font-size: 12px; min-width: 84px; }
+.field-row > label.inline-label { min-width: 0; }
+.field-row > label.chk-label { min-width: 0; color: var(--text); }
+
+select, input[type="text"], input[type="number"], textarea {
+  background: var(--surface); border: 1px solid var(--panel); color: var(--text); font-family: monospace; font-size: 13px; padding: 5px 7px; outline: none;
+}
+select:focus, input:focus, textarea:focus { border-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: #666; }
+input[type="number"] { width: 64px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+.set-input { flex: 1; min-width: 160px; }
+textarea { width: 100%; resize: vertical; min-height: 120px; }
+
+.btn { padding: 6px 12px; font-family: monospace; font-size: 13px; cursor: pointer; border: 2px solid var(--panel); background: var(--surface); color: var(--text); }
+.btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-primary { border-color: var(--accent); color: var(--accent); }
+.btn-small { padding: 3px 8px; }
+.btn-row { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; align-items: center; }
+.btn-row input[type="text"] { flex: 1; min-width: 100px; }
+
+/* segmented radio buttons */
+.seg input[type="radio"] { display: none; }
+.seg label.btn { padding: 4px 12px; }
+.seg input[type="radio"]:checked + label.btn { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+
+/* your mons */
+.mon-card { border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; margin-top: 10px; }
+.mon-card.out { border-color: var(--accent); }
+.mon-card .mc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mon-card .mc-name { font-weight: bold; }
+.mon-card .mc-meta { color: var(--muted); font-size: 11px; }
+.mon-card .field-row > label { min-width: 64px; }
+.out-radio { accent-color: var(--accent); }
+.active-block { border-top: 1px solid var(--border); margin-top: 12px; }
+
+.stage-grid { display: grid; grid-template-columns: repeat(4, auto 1fr); gap: 3px 6px; align-items: center; font-size: 11px; color: var(--muted); }
+.stage-grid select { padding: 2px 3px; font-size: 12px; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.col-title { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.two-col .field-row > label { min-width: 0; }
+
+.set-card { border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; margin: 4px 0 10px; font-size: 12px; }
+.set-card .sc-title { font-weight: bold; color: var(--accent); margin-bottom: 4px; }
+.set-card .sc-meta { color: var(--muted); margin-bottom: 4px; line-height: 1.5; }
+.set-card .sc-meta b { color: var(--text); font-weight: normal; }
+.hp-abs { color: var(--muted); font-size: 12px; }
+
+/* results */
+.results-block { margin-top: 6px; }
+.best-move { font-size: 15px; color: var(--best); border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; min-height: 36px; }
+.best-move.tie { color: var(--tie); }
+.progress { color: var(--muted); font-size: 11px; margin: 6px 0; min-height: 14px; }
+.options-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.options-table th { color: var(--muted); font-weight: normal; text-align: right; padding: 4px; border-bottom: 1px solid var(--border); }
+.options-table th:first-child, .options-table td:first-child { text-align: left; }
+.options-table td { padding: 5px 4px; text-align: right; border-bottom: 1px solid #333; white-space: nowrap; }
+.options-table tr.best td:first-child { color: var(--best); }
+.options-table tr.tie td:first-child { color: var(--tie); }
+.options-table .pm { color: var(--muted); font-size: 11px; }
+.notes { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.5; }
+.error-display { color: var(--error); font-size: 12px; margin-top: 6px; white-space: pre-wrap; }
+
+.choice-bars .cb-row { display: grid; grid-template-columns: 1fr 44px; gap: 6px; font-size: 11px; margin-bottom: 3px; align-items: center; }
+.choice-bars .cb-name { position: relative; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.choice-bars .cb-fill { position: absolute; inset: 0 auto 0 0; background: rgba(0, 217, 255, 0.18); z-index: 0; }
+.choice-bars .cb-name span { position: relative; z-index: 1; }
+.choice-bars .cb-p { text-align: right; color: var(--muted); }
+#savedTeams { flex: 1; min-width: 0; }

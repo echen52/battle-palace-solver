@@ -22,15 +22,14 @@ export async function solveMCParallel(tctx, s0, {
     const w = new Worker(WORKER);
     return { post: (m) => w.postMessage(m), onMessage: (f) => w.on("message", f), terminate: () => w.terminate(), w };
   });
-  const errors = [];
-  pool.forEach((h) => h.w.on("error", (e) => errors.push(e)));
+  // A crashed worker reaches the solve as an error message, not a hang.
+  pool.forEach((h) => h.w.on("error", (e) => h.w.emit("message", { type: "error", error: e.message })));
   try {
     const r = await runSolve({
       pool, actions: rootActions(start[0].state), budgetMs, seed, batch, minRollouts, onProgress, signal,
-      init: { team: tctx.team, opp: tctx.opp, exactRoll: !!tctx.exactRoll, nextInSpec: tctx.nextIn?.spec ?? null,
+      init: { team: tctx.team, opp: tctx.opp, oppReserves: tctx.oppReserves ?? 2, exactRoll: !!tctx.exactRoll, nextInSpec: tctx.nextIn?.spec ?? null,
         nextInWarm: tctx.nextIn?.exportCache?.() ?? null, weights, start },
     });
-    if (errors.length) throw errors[0];
     return { ...r, workers };
   } finally {
     await Promise.all(pool.map((h) => h.terminate()));

@@ -1,7 +1,7 @@
 // ── worker-handler.js ──────────────────────────────────────────────────────
 // What a solve worker does, whatever thread API carries it (mc-worker.js for
 // Node, site/worker.js for the page). Messages in:
-//   { type: "init", team, opp, exactRoll, nextInSpec, weights, start }
+//   { type: "init", team, opp, oppReserves, exactRoll, nextInSpec, weights, start }
 //   { type: "root", lever, action }        -> { type: "root", lever, root }
 //   { type: "frontiers", frontiers, firstActions }
 //   { type: "batch", lever, n, seed }      -> { type: "batch", lever, tally }
@@ -20,7 +20,7 @@ export function makeHandler(post) {
     try {
       if (msg.type === "init") {
         weights = msg.weights;
-        tctx = { team: msg.team, opp: msg.opp, exactRoll: !!msg.exactRoll, ...(msg.nextInSpec ? { nextIn: makeNextIn(msg.nextInSpec, msg.nextInWarm ?? null) } : {}) };
+        tctx = { team: msg.team, opp: msg.opp, oppReserves: msg.oppReserves ?? 2, exactRoll: !!msg.exactRoll, ...(msg.nextInSpec ? { nextIn: makeNextIn(msg.nextInSpec, msg.nextInWarm ?? null) } : {}) };
         start = asMix(msg.start);
       } else if (msg.type === "root") {
         const parts = start.map(({ p, state }) => ({ p, root: solveAction(rootCtx(tctx), state, msg.action,
