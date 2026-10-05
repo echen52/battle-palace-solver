@@ -2,7 +2,8 @@
 
 Battle Palace engine (and, next, solver) for Pokémon Emerald. Started
 2026-10-02. **Mechanics, PP (Phase A) and the team layer (Phase B) are done;
-Phase C step 1 (score) is done (2026-10-05); next: step 2, the exact attempt.**
+Phase C step 1 (score) and the opponent's replacement after a KO are done
+(2026-10-05); next: step 2, the exact attempt.**
 
 ## What this is
 
@@ -30,7 +31,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (7/7)
+## Tests — `bash tools/run-suite.sh` (8/8)
 
 | test | what it pins |
 |---|---|
@@ -40,6 +41,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-engine-fixes | Protect reset, Destiny Bond timing (5/8 fail on the unfixed engine) |
 | test-team | 33: classification, carried vs left-behind fields, Toxic/sleep on return, Spikes 1/8 1/6 1/4, Intimidate / Sand Stream / Truant on entry, switch order, Pursuit x2, Roar 50/50 and its blocks, Baton Pass, faint/replace/lose, end of turn after a KO, Perish switch; 300+ random team turns sum to 1 |
 | test-score | 46: Showdown reader on the user's team (`teams/user-test-team.txt`; stats by hand, bad lines throw), every score term on hand-built positions, monWeights, outcome chances on a real turn. 5/5 mutations caught |
+| test-next-in | 37: trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -94,6 +96,25 @@ Snorlax/Starmie 24 ms/game (12 turns), Metagross/Salamence 44 ms (5),
 Gengar/Dusclops 115 ms (44), Blissey/Skarmory 163 ms (99) — ~2–9 ms/turn.
 Target after speed-ups: a few seconds typical, ≤~30 s for stall fights.
 
+## The opponent's replacement (engine/next-in.js, 2026-10-05)
+
+User asked for it, decomp-only (no invented switching). When the mon you fight
+faints, the opponent sends in GetMostSuitableMonToSwitchInto's pick
+(battle_ai_switch_items.c:629) -- ported line by line, incl. the typing pass
+that prefers the teammate YOUR types hit hardest (source comment: "possible
+bug") and the damage fallback, which runs with gCurrentMove = MOVE_NONE
+(HandleAction_ActionFinished, battle_util.c:670) so every move's base is 3.
+Teammates: exact distribution from the trainer draw (challenge + battle, or
+trainerId) and FillTrainerParty's rules, conditioned on the lead. Score: a win
+costs nextIn (0.5, user chose "best hit") x the replacement's expected
+best-hit share of your active mon's current HP. Inputs: tctx.nextIn =
+makeNextIn({ lead: "<pool key>", challenge, battle }).
+Gaps: trainers already fought this challenge are not excluded; no crits /
+entry abilities in the best hit; when both mons faint the same turn no
+penalty is charged; the opponent's VOLUNTARY switches (ShouldSwitch reasons
+other than Perish Song) are in the decomp but still not ported -- user to
+decide; Frontier Brain battles (fixed teams) not wired.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
@@ -102,3 +123,6 @@ random lv50 matchups: 211 throw in the predictor (status moves with no AI
 handler), 1,032/1,289 identical, 98 differ by >10 points, 38 by >25 (largest:
 Tentacruel 1's Sludge Bomb into Steelix, Fake Out into Ghosts, Earthquake into
 a Traced Levitate).
+Also (2026-10-05): its bracket_pools.mjs challenge-1 pool lacks Metapod 1,
+Kakuna 1, Silcoon 1, Cascoon 1 -- the FRONTIER_MONS_BUG_CATCHER_1_EXTRA(...)
+macro arguments its generator dropped (trainers LEWIS 48, YOSHI 49).
