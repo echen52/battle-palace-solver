@@ -9,8 +9,8 @@ import { parentPort, workerData } from "node:worker_threads";
 import { rollout, rng, newTally, addTo, frontierSampler } from "./montecarlo.js";
 import { makeNextIn } from "./next-in.js";
 
-const { team, opp, nextInSpec, nextInWarm, weights, frontiers } = workerData;
-const tctx = { team, opp, ...(nextInSpec ? { nextIn: makeNextIn(nextInSpec, nextInWarm) } : {}) };
+const { team, opp, exactRoll, nextInSpec, nextInWarm, weights, frontiers } = workerData;
+const tctx = { team, opp, exactRoll, ...(nextInSpec ? { nextIn: makeNextIn(nextInSpec, nextInWarm) } : {}) };
 const samplers = frontiers.map((f) => (f ? frontierSampler({ frontier: f }) : null));
 const replCache = new Map();
 

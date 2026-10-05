@@ -97,6 +97,10 @@ export const aliveBench = (s) => s.youBench.map((e, i) => (e && e.hpPct > 0 ? i 
 export function engineCtx(tctx, s, { noLabels = true } = {}) {
   return {
     you: tctx.team[s.youActive], opp: tctx.opp, noLabels,
+    // The damage roll: tctx.exactRoll enumerates the 16 rolls of every landed
+    // hit; tctx.rollSample (a () => [0,1) source) draws one per hit instead,
+    // for rollouts. Neither: the inherited 92.5% point estimate.
+    ...(tctx.exactRoll ? { exactRoll: true } : {}), ...(tctx.rollSample ? { rollSample: tctx.rollSample } : {}),
     reserves: { you: aliveBench(s).length, opp: tctx.oppReserves ?? 2 },
     onDrag: (st) => dragIn(tctx, st),
   };

@@ -9814,7 +9814,7 @@ function cancelerGates(ctx, state, actor, moveName, moveData) {
         const fbItem = itemData((actor === "you" ? ctx.you : ctx.opp).item);
         // F31: in exact-roll mode the self-hit's adjustnormaldamage2 roll is
         // drawn here, and the Focus Band check uses each roll's damage.
-        for (const [pr, roll] of ctx.exactRoll ? ROLL_VALUES.map((v) => [1 / 16, v]) : [[1, null]]) {
+        for (const [pr, roll] of rollArms(ctx) ?? [[1, null]]) {
           const selfHitOutcome = { hit: null, selfHit: true, secondaryTriggered: false, statusPrevented: false, ...carry, ...(roll != null ? { roll } : {}) };
           let banded = false;
           if (fbItem && fbItem.holdEffect === "HOLD_EFFECT_FOCUS_BAND"
@@ -10545,8 +10545,21 @@ function counterReceived(state, actor, moveData) {
 // branches over 85..100, 1/16 each. A two-hit move draws a roll per hit;
 // more hits are refused by name rather than approximated.
 const ROLL_VALUES = Array.from({ length: 16 }, (_, k) => 85 + k);
+// PALACE FORK: SAMPLED roll (ctx.rollSample, a () => [0,1) source). For a
+// rollout that draws one outcome per turn by probability: each landed hit
+// draws ONE roll here and the branch keeps its probability, so the two-stage
+// draw has exactly the enumerated distribution at 1/16 (or 1/16^hits) of the
+// cost. Multi-hit moves draw every hit independently -- no grouping, so none
+// of the grouped path's Substitute / Endure / Focus Band refusals apply.
+// rollArms(ctx): the [probability, roll] arms one roll site branches into.
+const drawRoll = (ctx) => ROLL_VALUES[Math.min(15, Math.floor(ctx.rollSample() * 16))];
+function rollArms(ctx) {
+  if (ctx.rollSample) return [[1, drawRoll(ctx)]];
+  if (ctx.exactRoll) return ROLL_VALUES.map((v) => [1 / 16, v]);
+  return null;
+}
 function rollSplit(ctx, state, actor, moveName, moveData, results) {
-  if (!ctx.exactRoll) return results;
+  if (!ctx.exactRoll && !ctx.rollSample) return results;
   if (moveData.power === 0 || SET_DAMAGE_EFFECTS.has(moveData.effect) || ROLL_EXEMPT(moveData.effect)
       || moveData.effect === "EFFECT_LEVEL_DAMAGE" || moveData.effect === "EFFECT_OHKO"
       || moveData.effect === "EFFECT_FUTURE_SIGHT") return results;
@@ -10554,6 +10567,10 @@ function rollSplit(ctx, state, actor, moveName, moveData, results) {
   for (const r of results) {
     if (!r.hit || !r.dmgHit || r.variablePower === "heal" || r.variablePower === "failed") { out.push(r); continue; }
     const hits = r.hitCount ?? 1;
+    if (ctx.rollSample) {
+      out.push({ ...r, roll: hits === 1 ? drawRoll(ctx) : Array.from({ length: hits }, () => drawRoll(ctx)) });
+      continue;
+    }
     if (hits === 1) {
       for (const v of ROLL_VALUES) out.push({ ...r, p: r.p / 16, roll: v });
     } else if (hits === 2) {
@@ -11236,10 +11253,10 @@ function futureSightReleaseSide(ctx, br, side) {
   const res = [];
   if (pHit < 1) res.push({ p: br.p * (1 - pHit), state: s, label: `${br.label} (${fs.move} misses)` });
   // F31: exact-roll mode draws adjustnormaldamage2's roll here too.
-  const rollArms = ctx.exactRoll
-    ? ROLL_VALUES.map((v) => [1 / 16, Math.max(1, Math.floor((fs.dmg * v) / 100))])
-    : [[1, Math.max(1, Math.floor(fs.dmg * 0.925))]]; // the battle path's point-estimate roll
-  if (pHit > 0) for (const [pr, dmg] of rollArms) {
+  const fsArms = (rollArms(ctx) ?? [[1, null]]).map(([pr, v]) => [pr, v == null
+    ? Math.max(1, Math.floor(fs.dmg * 0.925)) // the battle path's point-estimate roll
+    : Math.max(1, Math.floor((fs.dmg * v) / 100))]);
+  if (pHit > 0) for (const [pr, dmg] of fsArms) {
     const subKey = side === "you" ? "youSubstituteHP" : "oppSubstituteHP";
     const hpNow = Math.round((s[hpKey] / 100) * target.stats.hp);
     const fb = itemData(target.item);

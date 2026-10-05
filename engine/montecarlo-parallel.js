@@ -29,7 +29,7 @@ export async function solveMCParallel(tctx, s0, {
   const ests = () => roots.map((r, i) => estimate(r, tallies[i]));
   if (open.length === 0) return { levers: ests(), stoppedBy: "exact", ms: Date.now() - t0, exactMs, workers: 0 };
 
-  const data = { team: tctx.team, opp: tctx.opp, nextInSpec: tctx.nextIn?.spec ?? null,
+  const data = { team: tctx.team, opp: tctx.opp, exactRoll: !!tctx.exactRoll, nextInSpec: tctx.nextIn?.spec ?? null,
     nextInWarm: tctx.nextIn?.exportCache?.() ?? null, weights,
     frontiers: roots.map((r) => (r.complete ? null : r.frontier)) };
   const pool = Array.from({ length: workers }, () => new Worker(WORKER, { workerData: data }));
@@ -67,4 +67,13 @@ export async function solveMCParallel(tctx, s0, {
     await Promise.all(pool.map((w) => w.terminate()));
   }
   return { levers: ests(), stoppedBy, ms: Date.now() - t0, exactMs, workers };
+}
+
+// The entry point: the parallel solve with the solver's defaults. Damage
+// rolls are EXACT unless asked otherwise (user decision 2026-10-05: the 16
+// rolls, enumerated in the exact first turn, drawn per hit in rollouts);
+// rolls: "point" keeps the inherited 92.5% estimate.
+export function solveFight(tctx, s0, { rolls = "exact", ...opts } = {}) {
+  if (rolls !== "exact" && rolls !== "point") throw new Error(`solveFight: rolls must be "exact" or "point", got ${rolls}`);
+  return solveMCParallel({ ...tctx, exactRoll: rolls === "exact" }, s0, opts);
 }

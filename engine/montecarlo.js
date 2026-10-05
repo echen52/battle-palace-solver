@@ -38,7 +38,10 @@ const pick = (items, u) => {
 
 // One fight from `s` (a live position, your turn to choose "stay"), to the end.
 // Returns { score, outcome, turns }.
+// With tctx.exactRoll set, each hit's damage roll is DRAWN (rollSample) rather
+// than enumerated -- the same distribution, one branch per hit.
 export function rollout(tctx, s, rand, { weights, replCache = null, turnCap = 400 } = {}) {
+  if (tctx.exactRoll) tctx = { ...tctx, exactRoll: false, rollSample: rand };
   let st = s;
   for (let turn = 1; turn <= turnCap; turn++) {
     const r = pick(teamTurn(tctx, st, "stay"), rand());

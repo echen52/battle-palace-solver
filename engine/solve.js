@@ -7,6 +7,9 @@
 //   after your faint   send the "best-scoring" mon: the one whose next turn
 //                      (one more enumerated "stay" turn) has the highest
 //                      expected score. Ties: the lower team index.
+// Damage rolls: with tctx.exactRoll (solveFight, montecarlo-parallel.js, sets it by default)
+// every landed hit branches over the 16 rolls; without, the inherited 92.5%
+// point estimate.
 // The fight is enumerated turn by turn; equal positions are merged (keyed by
 // the whole state), so long fights grow by distinct positions, not paths.
 // Every fight ends (PP runs out, then Struggle), but long ones are too big: the
@@ -20,9 +23,13 @@ const keyOf = (s) => JSON.stringify(s);
 
 // The replacement rule, shared with the Monte Carlo. `cache` maps a position
 // key to the chosen index.
+// The lookahead runs on the 92.5% point estimate whatever the solve's roll
+// mode: it is a decision rule, not a measurement, and 16 rolls per hit would
+// make every faint cost a second. Exact search and rollouts share it.
 export function chooseReplacement(tctx, s, weights, cache = null) {
   const k = cache ? keyOf(s) : null;
   if (cache?.has(k)) return cache.get(k);
+  if (tctx.exactRoll || tctx.rollSample) tctx = { ...tctx, exactRoll: false, rollSample: null };
   let best = -Infinity, bestJ = null;
   for (const j of aliveBench(s)) {
     const sIn = replace(tctx, s, j);
