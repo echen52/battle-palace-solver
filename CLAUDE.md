@@ -2,7 +2,7 @@
 
 Battle Palace engine (and, next, solver) for Pokémon Emerald. Started
 2026-10-02. **Mechanics, PP (Phase A) and the team layer (Phase B) are done;
-the design is AGREED (see "Phase C plan" below). Next session: build Phase C.**
+Phase C step 1 (score) is done (2026-10-05); next: step 2, the exact attempt.**
 
 ## What this is
 
@@ -30,7 +30,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (6/6)
+## Tests — `bash tools/run-suite.sh` (7/7)
 
 | test | what it pins |
 |---|---|
@@ -39,6 +39,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-palace | groups 354/354 vs battle_moves.h parsed directly; nature rows vs source comments; fallback + vanilla bug; loafs; limits; latch; history; 602 corpus positions |
 | test-engine-fixes | Protect reset, Destiny Bond timing (5/8 fail on the unfixed engine) |
 | test-team | 33: classification, carried vs left-behind fields, Toxic/sleep on return, Spikes 1/8 1/6 1/4, Intimidate / Sand Stream / Truant on entry, switch order, Pursuit x2, Roar 50/50 and its blocks, Baton Pass, faint/replace/lose, end of turn after a KO, Perish switch; 300+ random team turns sum to 1 |
+| test-score | 46: Showdown reader on the user's team (`teams/user-test-team.txt`; stats by hand, bad lines throw), every score term on hand-built positions, monWeights, outcome chances on a real turn. 5/5 mutations caught |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -65,7 +66,7 @@ Workflow rule learned the hard way: **commit before any mutation check** —
 - No emulator validation of the Palace layer yet (arena-solver/emu has the
   harness; Palace would need BATTLE_TYPE_PALACE battles).
 
-## Phase C plan (agreed with the user 2026-10-02, not started)
+## Phase C plan (agreed with the user 2026-10-02; step 1 built 2026-10-05)
 
 Goal: knock out the ONE opponent mon in front with minimal damage/status/PP
 cost to your team, without knowing its 2 teammates. Levers once the round
