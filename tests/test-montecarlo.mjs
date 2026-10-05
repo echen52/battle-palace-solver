@@ -73,6 +73,21 @@ const start = T.teamStart(tctx, 0);
   ok(near(rp.levers[0].score, r.levers[0].score) && rp.levers[0].rollouts === 0, "...the parallel solve agrees");
 }
 
+// ── a deferred replacement in a rollout ────────────────────────────────────
+{
+  // A rollout from a fainted position (solveAction deferReplace leaves those
+  // in the frontier) is a rollout from the replaced one: the choice draws no
+  // random numbers, so with one seed the two agree digit for digit.
+  const down = { ...start, yourHpPct: 0 };
+  const j = X.chooseReplacement(tctx, down);
+  let same = true;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const a = M.rollout(tctx, down, M.rng(seed)), b = M.rollout(tctx, T.replace(tctx, down, j), M.rng(seed));
+    if (JSON.stringify(a) !== JSON.stringify(b)) same = false;
+  }
+  ok(same, `rollouts from a fainted position replace first (${team[j].species} in)`);
+}
+
 // ── the worker reproduces the main thread exactly ──────────────────────────
 {
   const nextIn = N.makeNextIn({ lead: "Salamence 1", challenge: 3, battle: 7 });
