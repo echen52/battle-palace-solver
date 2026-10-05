@@ -78,9 +78,13 @@ const same = (ex, bf) => near(ex.score, bf.score) && near(ex.pKO, bf.pKO) && nea
   const vals = T.aliveBench(s).map((k) => [k, val(k)]);
   const bestV = Math.max(...vals.map((v) => v[1]));
   ok(j === vals.find((v) => v[1] === bestV)[0], `the replacement is the best next turn (${vals.map((v) => `${team[v[0]].species} ${v[1].toFixed(4)}`).join(", ")})`);
-  // Latios (the first bench slot) at 5%: Swampert's next turn is better.
-  const weak = { ...s, youBench: s.youBench.map((e, i) => (i === 1 ? { ...e, hpPct: 5 } : e)) };
-  ok(X.chooseReplacement(tctx, weak) === 2, "not simply the first: Latios at 5% -> Swampert");
+  // Not simply the first bench slot: with the bench order swapped (Swampert
+  // first), the rule still picks Latios. (One-turn lookahead also prefers a
+  // Latios at 5%, even frozen -- it has ~0.3 to lose, Swampert 1.25: the rule
+  // sends the worn mon in to take the hit.)
+  const swapped = { team: [team[0], team[2], team[1]], opp };
+  const s2 = { ...T.teamStart(swapped, 0), yourHpPct: 0 };
+  ok(X.chooseReplacement(swapped, s2) === 2 && j === 1, "the best, not the first: Latios in either bench slot");
   const one = { ...s, youBench: s.youBench.map((e, i) => (i === 1 ? { ...e, hpPct: 0 } : e)) };
   ok(X.chooseReplacement(tctx, one) === 2, "one mon left: that one");
   const cache = new Map();
