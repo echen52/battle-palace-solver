@@ -16,6 +16,11 @@
 //               next fight on the low-HP nature row)
 //             - carry-over volatiles: confusion 0.05, Leech Seed 0.05,
 //               Curse 0.10, a Perish Song count 0.30 (user OK 2026-10-05)
+//             - on a "win", when tctx.nextIn is given (next-in.js makeNextIn):
+//               nextIn * the share of its current HP the opponent's
+//               replacement's best hit takes, averaged over who comes in
+//               (GetMostSuitableMonToSwitchInto over the teammates the lead's
+//               trainer can have). User choice 2026-10-05.
 // The field:  + spikes per layer on the opponent's side
 //             + screen per remaining turn of your Reflect / Light Screen
 //             + koBonus when the outcome is "win"
@@ -34,6 +39,7 @@ export const DEFAULT_WEIGHTS = Object.freeze({
   boost: 0.05,
   lowHp: 0.05,
   carry: Object.freeze({ confused: 0.05, seeded: 0.05, cursed: 0.10, perish: 0.30 }),
+  nextIn: 0.5,
   spikes: 0.05,
   screen: 0.01,
   koBonus: 0,
@@ -93,8 +99,13 @@ export function scoreState(tctx, s, outcome = null, weights = DEFAULT_WEIGHTS) {
     field.lowHp = lowHpCheck(team[s.youActive], s.yourHpPct, s.youStatus) ? -w.lowHp : 0;
     field.carry = -((s.youConfused ? w.carry.confused : 0) + (s.youSeeded ? w.carry.seeded : 0)
       + (s.youCursed ? w.carry.cursed : 0) + (s.youPerishCount != null ? w.carry.perish : 0));
-    act.parts.boost = field.boost; act.parts.lowHp = field.lowHp; act.parts.carry = field.carry;
-    act.value += field.boost + field.lowHp + field.carry;
+    field.nextIn = 0;
+    if (outcome === "win" && tctx.nextIn) {
+      field.nextInShare = tctx.nextIn.expectedHitShare(team, tctx.opp, s);
+      field.nextIn = -w.nextIn * field.nextInShare;
+    }
+    act.parts.boost = field.boost; act.parts.lowHp = field.lowHp; act.parts.carry = field.carry; act.parts.nextIn = field.nextIn;
+    act.value += field.boost + field.lowHp + field.carry + field.nextIn;
   }
   field.spikes = w.spikes * (s.oppSpikesLayers ?? 0);
   field.screen = w.screen * ((s.youReflectTurns ?? 0) + (s.youLightScreenTurns ?? 0));
