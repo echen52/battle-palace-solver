@@ -64,6 +64,17 @@ const meanOpp = (rs) => rs.reduce((a, r) => a + r.p * r.state.oppHpPct, 0);
   ok(Math.abs(q - pKO(exact)) < 3 * se, `P(KO turn 1): drawn ${q.toFixed(4)} vs enumerated ${pKO(exact).toFixed(4)} (3 sd ${(3 * se).toFixed(4)})`);
   const m = sum / n, sd = Math.sqrt(sumSq / n - m * m);
   ok(Math.abs(m - meanOpp(exact)) < 3 * sd / Math.sqrt(n), `mean opponent HP after turn 1: drawn ${m.toFixed(3)} vs enumerated ${meanOpp(exact).toFixed(3)}`);
+  // rollout() itself, in the exact roll mode, cut at one turn: at the opponent
+  // HP where the point estimate is furthest off (60%: 74.5% vs 66.7%), it
+  // must reproduce the 16-roll answer.
+  {
+    const s60 = { ...start, oppHpPct: 60 };
+    const ex = pKO(T.teamTurn({ ...tctx, exactRoll: true }, s60, "stay")), pt = pKO(T.teamTurn(tctx, s60, "stay"));
+    const rr = M.rng(77); let k = 0; const N2 = 3000;
+    for (let i = 0; i < N2; i++) if (M.rollout({ ...tctx, exactRoll: true }, s60, rr, { turnCap: 1 }).outcome === "win") k++;
+    const se2 = Math.sqrt((ex * (1 - ex)) / N2);
+    ok(Math.abs(k / N2 - ex) < 3 * se2 && Math.abs(k / N2 - pt) > 3 * se2, `rollout() draws the rolls: P(KO) ${(k / N2).toFixed(4)} vs 16 rolls ${ex.toFixed(4)}, not the point estimate's ${pt.toFixed(4)}`);
+  }
   const rs = T.teamTurn({ ...tctx, rollSample: M.rng(1) }, start, "stay");
   ok(rs.length === T.teamTurn(tctx, start, "stay").length && near(rs.reduce((a, r) => a + r.p, 0), 1), "a drawn turn has the point estimate's branch count and sums to 1");
 }
