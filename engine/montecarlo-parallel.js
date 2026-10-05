@@ -11,7 +11,7 @@
 import { Worker } from "node:worker_threads";
 import os from "node:os";
 import { solveAction, rootActions } from "./solve.js";
-import { newTally, mergeTally, estimate, separated } from "./montecarlo.js";
+import { newTally, mergeTally, estimate, separated, rootCtx, firstActionOf } from "./montecarlo.js";
 
 const WORKER = new URL("./mc-worker.js", import.meta.url);
 
@@ -21,7 +21,7 @@ export async function solveMCParallel(tctx, s0, {
 } = {}) {
   const t0 = Date.now();
   const replCache = new Map();
-  const roots = rootActions(s0).map((a) => solveAction(tctx, s0, a, { weights, budgetMs: Infinity, maxTurns: 1, replCache }));
+  const roots = rootActions(s0).map((a) => solveAction(rootCtx(tctx), s0, a, { weights, budgetMs: Infinity, maxTurns: 1, replCache, deferReplace: true }));
   const tallies = roots.map(() => newTally());
   const pending = roots.map(() => 0);
   const open = roots.map((r, i) => (!r.complete ? i : -1)).filter((i) => i >= 0);
@@ -31,7 +31,7 @@ export async function solveMCParallel(tctx, s0, {
 
   const data = { team: tctx.team, opp: tctx.opp, exactRoll: !!tctx.exactRoll, nextInSpec: tctx.nextIn?.spec ?? null,
     nextInWarm: tctx.nextIn?.exportCache?.() ?? null, weights,
-    frontiers: roots.map((r) => (r.complete ? null : r.frontier)) };
+    frontiers: roots.map((r) => (r.complete ? null : r.frontier)), firstActions: roots.map(firstActionOf) };
   const pool = Array.from({ length: workers }, () => new Worker(WORKER, { workerData: data }));
   const batchNo = roots.map(() => 0);
   let stoppedBy = null;

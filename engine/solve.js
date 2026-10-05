@@ -53,8 +53,14 @@ export function rootActions(s) {
 // `frontier` -- [{ p, state }], the open positions after the last full turn,
 // which is where step 3's Monte Carlo picks up. The budget is checked before
 // every position (one teamTurn can take ~75 ms, so it can overrun by that).
-// maxTurns stops after that many full turns the same way (stoppedBy says which).
-export function solveAction(tctx, s0, action, { weights, budgetMs = 2000, deadline = null, replCache = new Map(), maxTurns = Infinity } = {}) {
+// maxTurns stops after that many full turns the same way (stoppedBy says which;
+// "rolls" when the exact roll enumeration refused a turn -- see rollOutcomeCap).
+// turnsDone 0 means the frontier is the start: rollouts must play `action` first.
+// deferReplace: the 16-roll first turn leaves thousands of distinct fainted
+// positions, and choosing each one's replacement up front cost 26 s of a 27 s
+// root (measured); deferred, a frontier position may be one where your mon
+// has fainted and the replacement is still to choose.
+export function solveAction(tctx, s0, action, { weights, budgetMs = 2000, deadline = null, replCache = new Map(), maxTurns = Infinity, deferReplace = false } = {}) {
   const t0 = Date.now();
   const stopAt = deadline ?? t0 + budgetMs;
   const acc = { score: 0, pKO: 0, pOppLeft: 0, pLose: 0, turnSum: 0 };
@@ -76,10 +82,23 @@ export function solveAction(tctx, s0, action, { weights, budgetMs = 2000, deadli
     for (const { p, state } of frontier.values()) {
       if (Date.now() > stopAt) return { ...partial(), stoppedBy: "budget" };
       positions++;
-      for (const r of teamTurn(tctx, state, turn === 0 ? action : "stay")) {
+      let rs;
+      try {
+        const live = state.yourHpPct <= 0 ? replace(tctx, state, chooseReplacement(tctx, state, weights, replCache)) : state;
+        rs = teamTurn(tctx, live, turn === 0 ? action : "stay");
+      } catch (e) {
+        // The exact roll enumeration refused a turn (tctx.rollOutcomeCap): stop here, with the last complete turn's frontier
+        // -- on turn 1, the start itself, which rollouts then play from the
+        // lever's own first action.
+        if (!/exact roll: too many outcomes/.test(e.message)) throw e;
+        return { ...partial(), stoppedBy: "rolls", rollError: e.message };
+      }
+      for (const r of rs) {
         const pr = p * r.p;
         let st = r.state;
-        if (r.outcome === "replace") st = replace(tctx, st, chooseReplacement(tctx, st, weights, replCache));
+        // deferReplace: keep the fainted position as it is (yourHpPct 0); the
+        // replacement is chosen when it is next played (below, or by a rollout).
+        if (r.outcome === "replace") { if (!deferReplace) st = replace(tctx, st, chooseReplacement(tctx, st, weights, replCache)); }
         else if (r.outcome) { finish(scratch, pr, st, r.outcome, turn + 1); continue; }
         const k = keyOf(st);
         const cur = next.get(k);

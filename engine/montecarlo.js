@@ -40,11 +40,14 @@ const pick = (items, u) => {
 // Returns { score, outcome, turns }.
 // With tctx.exactRoll set, each hit's damage roll is DRAWN (rollSample) rather
 // than enumerated -- the same distribution, one branch per hit.
-export function rollout(tctx, s, rand, { weights, replCache = null, turnCap = 400 } = {}) {
+// firstAction: the lever, when the rollout starts at the root itself (the
+// exact first turn was refused); later turns are always "stay".
+export function rollout(tctx, s, rand, { weights, replCache = null, turnCap = 400, firstAction = "stay" } = {}) {
   if (tctx.exactRoll) tctx = { ...tctx, exactRoll: false, rollSample: rand };
-  let st = s;
+  // A deferred replacement (solveAction deferReplace): your mon is down, pick its successor first.
+  let st = s.yourHpPct <= 0 ? replace(tctx, s, chooseReplacement(tctx, s, weights, replCache)) : s;
   for (let turn = 1; turn <= turnCap; turn++) {
-    const r = pick(teamTurn(tctx, st, "stay"), rand());
+    const r = pick(teamTurn(tctx, st, turn === 1 ? firstAction : "stay"), rand());
     if (r.outcome === "replace") { st = replace(tctx, r.state, chooseReplacement(tctx, r.state, weights, replCache)); continue; }
     if (r.outcome) return { score: scoreState(tctx, r.state, r.outcome, weights).score, outcome: r.outcome, turns: turn };
     st = r.state;
@@ -87,10 +90,20 @@ export function estimate(root, t) {
     pOppLeft: root.pOppLeft + open * prop("left"),
     pLose: root.pLose + open * prop("lose"),
     pCapped: open * prop("capped"),
-    turns: t.n ? 1 + t.turns / t.n : 1, // the exact first turn + the rollout's
+    // the exact first turn + the rollout's (none when the rollouts start at the root)
+    turns: (root.turnsDone === 0 ? 0 : 1) + (t.n ? t.turns / t.n : 0),
     rollouts: t.n, exactOpen: open,
+    // false when the exact first turn was refused (rollOutcomeCap) and the
+    // rollouts played it too
+    exactFirstTurn: root.complete || root.turnsDone > 0,
   };
 }
+
+// The exact first turn's context: rolls enumerated, capped (logic.js rollSplit).
+export const ROLL_OUTCOME_CAP = 4000;
+export const rootCtx = (tctx) => (tctx.exactRoll ? { ...tctx, rollOutcomeCap: ROLL_OUTCOME_CAP } : tctx);
+// A root that stopped before finishing turn 1 hands its rollouts the lever.
+export const firstActionOf = (root) => (root.turnsDone === 0 ? root.action : "stay");
 
 // Draws a frontier position by probability.
 export function frontierSampler(root) {
@@ -106,15 +119,15 @@ export function solveMC(tctx, s0, { weights, budgetMs = 10000, seed = 1, round =
   const t0 = Date.now();
   const replCache = new Map();
   const levers = rootActions(s0).map((a) => {
-    const root = solveAction(tctx, s0, a, { weights, budgetMs: Infinity, maxTurns: 1, replCache });
-    return { root, tally: newTally(), sample: root.complete ? null : frontierSampler(root) };
+    const root = solveAction(rootCtx(tctx), s0, a, { weights, budgetMs: Infinity, maxTurns: 1, replCache, deferReplace: true });
+    return { root, tally: newTally(), sample: root.complete ? null : frontierSampler(root), first: firstActionOf(root) };
   });
   const rand = rng(seed);
   let stoppedBy = "budget";
   for (;;) {
     for (const L of levers) {
       if (!L.sample) continue;
-      for (let i = 0; i < round; i++) addTo(L.tally, rollout(tctx, L.sample(rand()), rand, { weights, replCache }));
+      for (let i = 0; i < round; i++) addTo(L.tally, rollout(tctx, L.sample(rand()), rand, { weights, replCache, firstAction: L.first }));
     }
     const ests = levers.map((L) => estimate(L.root, L.tally));
     if (separated(ests, minRollouts)) { stoppedBy = "separated"; break; }

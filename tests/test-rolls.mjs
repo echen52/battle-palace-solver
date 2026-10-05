@@ -89,24 +89,41 @@ const meanOpp = (rs) => rs.reduce((a, r) => a + r.p * r.state.oppHpPct, 0);
   ok(throws(() => T.teamTurn({ ...tg, exactRoll: true }, s, "stay"), /Substitute, Endure or Focus Band/), "exact: Rock Blast into a Substitute is refused by name");
   const rs = T.teamTurn({ ...tg, rollSample: M.rng(3) }, s, "stay");
   ok(near(rs.reduce((a, r) => a + r.p, 0), 1), "drawn: it runs, and sums to 1");
-  // Per-hit draws match the grouped enumeration where both run: a Geodude
-  // that knows only Rock Blast, into Latios with no Substitute -- the mean of
-  // Latios's HP after one turn.
+  // Per-hit draws match the grouped enumeration where both run: a Skitty
+  // that knows only Double Slap, into Swampert (17.6k outcomes, uncapped) --
+  // the mean of Swampert's HP after one turn. (Rock Blast into Latios groups
+  // into ~42k vectors by itself; crossed with crits and the turn it ran out
+  // of a 4 GB heap -- hence the cap below.)
+  const rb = L.buildMon({ ...getOpponentConfig("Geodude 1", { ability: "Rock Head", ivTier: 3 }), moves: ["Rock Blast"] });
+  const tr = { team, opp: rb };
   {
-    const rb = L.buildMon({ ...getOpponentConfig("Geodude 1", { ability: "Rock Head", ivTier: 3 }), moves: ["Rock Blast"] });
-    const tr = { team, opp: rb };
-    const s1 = T.teamStart(tr, 1);
-    const ex = T.teamTurn({ ...tr, exactRoll: true }, s1, "stay");
+    const sk = L.buildMon({ ...getOpponentConfig("Skitty 1", { ability: "Cute Charm", ivTier: 3 }), moves: ["Double Slap"] });
+    const tsk = { team, opp: sk };
+    const s1 = T.teamStart(tsk, 2);
+    const ex = T.teamTurn({ ...tsk, exactRoll: true }, s1, "stay");
     const exMean = ex.reduce((a, r) => a + r.p * r.state.yourHpPct, 0);
     const rr = M.rng(55), N3 = 3000; let sum = 0, sq = 0;
     for (let i = 0; i < N3; i++) {
-      const rs = T.teamTurn({ ...tr, rollSample: rr }, s1, "stay");
+      const rs = T.teamTurn({ ...tsk, rollSample: rr }, s1, "stay");
       let u = rr(), acc = 0, r = rs[rs.length - 1];
       for (const x of rs) { acc += x.p; if (u < acc) { r = x; break; } }
       sum += r.state.yourHpPct; sq += r.state.yourHpPct ** 2;
     }
     const m = sum / N3, sd = Math.sqrt(sq / N3 - m * m);
-    ok(Math.abs(m - exMean) < 3 * sd / Math.sqrt(N3), `Rock Blast into Latios: drawn per hit ${m.toFixed(3)}% vs grouped enumeration ${exMean.toFixed(3)}% (3 se ${(3 * sd / Math.sqrt(N3)).toFixed(3)})`);
+    ok(Math.abs(m - exMean) < 3 * sd / Math.sqrt(N3), `Double Slap into Swampert: drawn per hit ${m.toFixed(3)}% vs grouped enumeration ${exMean.toFixed(3)}% (3 se ${(3 * sd / Math.sqrt(N3)).toFixed(3)})`);
+  }
+  // The cap: into Latios the exact first turn is refused by name, and the
+  // lever is played from the start by rollouts (first action included).
+  {
+    const sL = T.teamStart(tr, 1);
+    const root = X.solveAction(M.rootCtx({ ...tr, exactRoll: true }), sL, { switchTo: 0 }, { budgetMs: 60000, maxTurns: 1 });
+    const rootStay = X.solveAction(M.rootCtx({ ...tr, exactRoll: true }), sL, "stay", { budgetMs: 60000, maxTurns: 1 });
+    ok(rootStay.stoppedBy === "rolls" && rootStay.turnsDone === 0 && rootStay.open === 1 && rootStay.frontier[0].state === sL
+      && M.firstActionOf(rootStay) === "stay", `Rock Blast into Latios: exact turn refused (${rootStay.rollError?.slice(0, 60)}...), rollouts start at the root`);
+    ok(M.firstActionOf(root) === (root.turnsDone === 0 ? root.action : "stay"), "a refused switch lever hands its rollouts the switch");
+    const mc = M.solveMC({ ...tr, exactRoll: true }, sL, { budgetMs: 8000, seed: 9 });
+    ok(mc.levers.every((l) => l.rollouts >= 100 || l.exactOpen === 0) && mc.levers.every((l) => near(l.pKO + l.pOppLeft + l.pLose + l.pCapped, 1, 1e-9)),
+      `the whole solve still runs (${mc.stoppedBy}; ${mc.levers.map((l) => `${JSON.stringify(l.action)} ${l.score.toFixed(3)}±${l.margin.toFixed(3)}`).join(", ")})`);
   }
   const r = M.rollout({ ...tg, exactRoll: true }, s, M.rng(4));
   ok(["win", "lose", "oppLeft", "capped"].includes(r.outcome) || r.outcome === "win", `a whole rollout from there finishes (${r.outcome} in ${r.turns} turns)`);

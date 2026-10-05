@@ -70,6 +70,23 @@ const same = (ex, bf) => near(ex.score, bf.score) && near(ex.pKO, bf.pKO) && nea
   ok(c.complete && near(c.turns, 1) && near(cb.open, 0) && same(c, cb), `opponent at 1% in sand: complete in 1 turn, equals brute force (KO ${c.pKO.toFixed(4)}, lose ${c.pLose.toFixed(4)})`);
 }
 
+// ── deferred replacements ──────────────────────────────────────────────────
+{
+  // Choosing the replacement when the fainted position is next played, rather
+  // than when it is reached, changes nothing: 2 turns through faints, every
+  // lever, exact rolls on.
+  const s = { ...start, oppHpPct: 12, yourHpPct: 15, youBench: start.youBench.map((e) => e && { ...e, hpPct: 10 }) };
+  const tx = { ...tctx, exactRoll: true };
+  for (const action of X.rootActions(s)) {
+    const a = X.solveAction(tx, s, action, { budgetMs: 1e9, maxTurns: 2 });
+    const b = X.solveAction(tx, s, action, { budgetMs: 1e9, maxTurns: 2, deferReplace: true });
+    ok(same(a, { ...b, open: b.open ?? 0 }) && (a.complete || near(a.open, b.open)),
+      `${JSON.stringify(action)}: deferred = eager (score ${a.score.toFixed(6)} / ${b.score.toFixed(6)}, open ${(a.open ?? 0).toFixed(6)} / ${(b.open ?? 0).toFixed(6)})`);
+  }
+  const d = X.solveAction(tx, s, "stay", { budgetMs: 1e9, maxTurns: 1, deferReplace: true });
+  ok(d.frontier.some((f) => f.state.yourHpPct <= 0), "a deferred frontier holds fainted positions (to be replaced when played)");
+}
+
 // ── the replacement rule ───────────────────────────────────────────────────
 {
   const s = { ...start, yourHpPct: 0 };

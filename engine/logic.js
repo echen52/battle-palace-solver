@@ -10567,6 +10567,15 @@ function rollSplit(ctx, state, actor, moveName, moveData, results) {
   for (const r of results) {
     if (!r.hit || !r.dmgHit || r.variablePower === "heal" || r.variablePower === "failed") { out.push(r); continue; }
     const hits = r.hitCount ?? 1;
+    // PALACE FORK: the solver's cap (ctx.rollOutcomeCap). Measured 2026-10-05:
+    // a 3-5 hit move's grouped vectors (up to ~42k into Latios) times its
+    // per-hit crit masks, crossed with the rest of the turn, exhausts a 4 GB
+    // heap. So with the cap set, 3+ hits are refused at once, and any action
+    // whose roll split passes the cap is refused too -- by name; the solver
+    // then plays that lever by rollouts from the start (drawn rolls).
+    if (ctx.rollOutcomeCap && hits >= 3 && !ctx.rollSample) {
+      throw new Error(`exact roll: too many outcomes -- "${moveName}" hits ${hits} times`);
+    }
     if (ctx.rollSample) {
       out.push({ ...r, roll: hits === 1 ? drawRoll(ctx) : Array.from({ length: hits }, () => drawRoll(ctx)) });
       continue;
@@ -10615,6 +10624,9 @@ function rollSplit(ctx, state, actor, moveName, moveData, results) {
       const all = 16 ** hits;
       for (const g of groups.values()) out.push({ ...r, p: (r.p * g.n) / all, roll: g.vec });
     }
+  }
+  if (ctx.rollOutcomeCap && out.length > ctx.rollOutcomeCap) {
+    throw new Error(`exact roll: too many outcomes -- "${moveName}" splits into ${out.length} (cap ${ctx.rollOutcomeCap})`);
   }
   return out;
 }
