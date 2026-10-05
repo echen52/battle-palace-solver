@@ -32,7 +32,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (10/10)
+## Tests — `bash tools/run-suite.sh` (11/11, ~3.5 min, node gets a 4 GB heap)
 
 | test | what it pins |
 |---|---|
@@ -45,6 +45,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-next-in | 37: trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
 | test-solve | 17: exact search vs an unmerged brute force at 2 turns (every lever, worn-down position incl. faints/replacements; real start), a rule-decided fight to completion (1% in permanent sand), the replacement rule (best not first), budget + frontier (finished + open = 1). 5/5 mutations caught. ~11 s |
 | test-montecarlo | 16: estimator algebra + Wilson margins + separation rule; MC vs exact P(KO/lose within 2 turns) within 3 sd; exact-only levers get no rollouts; a worker's batch equals the main thread's digit for digit (next-in live in it); parallel vs single-thread within margins. 6/6 mutations caught. ~45 s |
+| test-rolls | 19: exact rolls through the team layer, a KO threshold the point estimate misses, drawn = enumerated (P(KO), mean HP; multi-hit per-hit draws vs grouped enumeration), rollout() draws the rolls, multi-hit into a Substitute, the root cap + fallback, workers carry the roll mode, solveFight. 5/5 mutations caught |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -52,10 +53,21 @@ Workflow rule learned the hard way: **commit before any mutation check** —
 
 ## Known gaps (stated, not silent)
 
-- DAMAGE ROLL: every battle hit uses the 92.5% point estimate (inherited
-  from the Arena engine, "amendment 15"), not the 16 rolls (85-100). For a
-  solver reporting P(KO) this matters at KO thresholds. Raised with the user
-  2026-10-05 -- decision pending.
+- DAMAGE ROLL (user chose option 1, 2026-10-05): the solver (solveFight)
+  runs EXACT rolls -- the inherited ctx.exactRoll enumerates the 16 rolls in
+  the exact first turn; the new ctx.rollSample draws one roll per hit in
+  rollouts (same distribution). Measured: at the opponent's 45-66% HP, P(KO
+  turn 1) differs from the 92.5% point estimate by up to 10 points. The
+  engine default is still the point estimate (fork-equivalence, mirror and
+  every older test run on it). Limits: the root refuses 3+ hit moves and
+  >4000-outcome actions (rollOutcomeCap) -> that lever is all rollouts; the
+  replacement rule's lookahead uses the point estimate (a decision rule).
+  Benchmark with exact rolls (user's team x 8 leads x each mon out, challenge
+  8): 22/24 separate, median ~6.5 s, exact root <= 2.4 s (deferReplace;
+  eager replacements had cost 26 s). One recommendation FLIPPED vs the point
+  estimate: Tyranitar 1 vs Latios out -- point: ->Metagross 0.861 vs
+  ->Swampert 0.829 (separated); exact: ->Swampert 0.843 vs ->Metagross 0.833
+  (budget, not separated).
 
 - PP (Phase A, 2026-10-02) is modelled: battle + party PP, ppreduce rules,
   Pressure, Struggle, the Palace mask / AI / loaf hooks, Leppa, Spite, Grudge,
