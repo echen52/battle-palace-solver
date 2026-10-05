@@ -32,7 +32,7 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
    decay now resets after a non-Protect resulting move (Cmd_setprotectlike);
    Destiny Bond lasts until the user's own next action (CANCELER_FLAGS).
 
-## Tests — `bash tools/run-suite.sh` (11/11, ~3.5 min, node gets a 4 GB heap)
+## Tests — `bash tools/run-suite.sh` (13/13, ~4 min, node gets a 4 GB heap)
 
 | test | what it pins |
 |---|---|
@@ -46,6 +46,8 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-solve | 17: exact search vs an unmerged brute force at 2 turns (every lever, worn-down position incl. faints/replacements; real start), a rule-decided fight to completion (1% in permanent sand), the replacement rule (best not first), budget + frontier (finished + open = 1). 5/5 mutations caught. ~11 s |
 | test-montecarlo | 16: estimator algebra + Wilson margins + separation rule; MC vs exact P(KO/lose within 2 turns) within 3 sd; exact-only levers get no rollouts; a worker's batch equals the main thread's digit for digit (next-in live in it); parallel vs single-thread within margins. 6/6 mutations caught. ~45 s |
 | test-rolls | 19: exact rolls through the team layer, a KO threshold the point estimate misses, drawn = enumerated (P(KO), mean HP; multi-hit per-hit draws vs grouped enumeration), rollout() draws the rolls, multi-hit into a Substitute, the root cap + fallback, workers carry the roll mode, solveFight. 5/5 mutations caught |
+| test-ui-logic | 36: every page input onto its engine field (HP, status, bad poison counter, bench, stages vs switch-in Intimidate, confusion index, Substitute HP, items, first turn, weather + turns, screens + turns, Spikes, low-HP latch auto/manual, sleep mix weights, 1st/2nd/3rd opponent -> next-in + reserves), set list, IV odds, result rows / ties. 6/6 mutations caught |
+| test-site-browser | 13: the page in headless Chromium (Playwright from battle_arena_sim/node_modules): team paste, set card, IV default, opponent's bars = turnChoices, page solve vs solveFight in Node (best + every score within margins), Stop, saved team over a reload, no page error |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -153,6 +155,21 @@ penalty is charged; the opponent's VOLUNTARY switches (ShouldSwitch reasons
 other than Perish Song) are in the decomp but still not ported -- user to
 decide; Frontier Brain battles (fixed teams) not wired.
 
+## The page (site/, 2026-10-05; user asked for an Arena-solver-like page)
+
+Open it: serve palace-solver/ over http (it imports ../engine as ES modules
+and runs module Web Workers -- file:// will not do), e.g.
+`python -m http.server 8765` then http://localhost:8765/site/index.html.
+Files: index.html, styles.css (Palace family colours, Arena layout), app.js
+(DOM), ui-logic.js (pure: form -> buildFight -> { tctx, start mix, actions,
+labels, notes }; turnChoices; resultRows/verdict), solver.js + worker.js (the
+browser twin of montecarlo-parallel.js; shared engine/solve-core.js +
+engine/worker-handler.js). Saved teams: localStorage "palaceSolver.savedTeams"
+(all echen52 Pages sites share one origin -- the prefix keeps it apart).
+Not on the page yet: score weights (defaults used), PP, Leech Seed / Curse /
+Perish / other volatiles, Open Level, Frontier Brain battles.
+NOT PUBLISHED: no remote; publishing needs the user's OK and a repo.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
@@ -161,6 +178,11 @@ random lv50 matchups: 211 throw in the predictor (status moves with no AI
 handler), 1,032/1,289 identical, 98 differ by >10 points, 38 by >25 (largest:
 Tentacruel 1's Sludge Bomb into Steelix, Fake Out into Ghosts, Earthquake into
 a Traced Levitate).
+Also (2026-10-05): the vendored frontier-pool.js carries Mr. Mime twice --
+"MR_MIME 1-4" (indexed) and "Mr. Mime 1-4" (index null, brain: true, from the
+retired list; arena-solver tools/gen-frontier-pool.mjs brainKeys). Harmless
+here (the page lists indexed sets only); a generator fix belongs in
+arena-solver.
 Also (2026-10-05): its bracket_pools.mjs challenge-1 pool lacks Metapod 1,
 Kakuna 1, Silcoon 1, Cascoon 1 -- the FRONTIER_MONS_BUG_CATCHER_1_EXTRA(...)
 macro arguments its generator dropped (trainers LEWIS 48, YOSHI 49).
