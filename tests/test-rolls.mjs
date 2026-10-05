@@ -89,6 +89,25 @@ const meanOpp = (rs) => rs.reduce((a, r) => a + r.p * r.state.oppHpPct, 0);
   ok(throws(() => T.teamTurn({ ...tg, exactRoll: true }, s, "stay"), /Substitute, Endure or Focus Band/), "exact: Rock Blast into a Substitute is refused by name");
   const rs = T.teamTurn({ ...tg, rollSample: M.rng(3) }, s, "stay");
   ok(near(rs.reduce((a, r) => a + r.p, 0), 1), "drawn: it runs, and sums to 1");
+  // Per-hit draws match the grouped enumeration where both run: a Geodude
+  // that knows only Rock Blast, into Latios with no Substitute -- the mean of
+  // Latios's HP after one turn.
+  {
+    const rb = L.buildMon({ ...getOpponentConfig("Geodude 1", { ability: "Rock Head", ivTier: 3 }), moves: ["Rock Blast"] });
+    const tr = { team, opp: rb };
+    const s1 = T.teamStart(tr, 1);
+    const ex = T.teamTurn({ ...tr, exactRoll: true }, s1, "stay");
+    const exMean = ex.reduce((a, r) => a + r.p * r.state.yourHpPct, 0);
+    const rr = M.rng(55), N3 = 3000; let sum = 0, sq = 0;
+    for (let i = 0; i < N3; i++) {
+      const rs = T.teamTurn({ ...tr, rollSample: rr }, s1, "stay");
+      let u = rr(), acc = 0, r = rs[rs.length - 1];
+      for (const x of rs) { acc += x.p; if (u < acc) { r = x; break; } }
+      sum += r.state.yourHpPct; sq += r.state.yourHpPct ** 2;
+    }
+    const m = sum / N3, sd = Math.sqrt(sq / N3 - m * m);
+    ok(Math.abs(m - exMean) < 3 * sd / Math.sqrt(N3), `Rock Blast into Latios: drawn per hit ${m.toFixed(3)}% vs grouped enumeration ${exMean.toFixed(3)}% (3 se ${(3 * sd / Math.sqrt(N3)).toFixed(3)})`);
+  }
   const r = M.rollout({ ...tg, exactRoll: true }, s, M.rng(4));
   ok(["win", "lose", "oppLeft", "capped"].includes(r.outcome) || r.outcome === "win", `a whole rollout from there finishes (${r.outcome} in ${r.turns} turns)`);
 }
