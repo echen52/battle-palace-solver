@@ -113,6 +113,12 @@ const id = (k) => P[k].index;
   r = pick(swampert, ["Fire"], "Ninetales 1", "Magcargo 1");
   ok(r.slot === 1 && r.by === "damage", `fallback: Ninetales by its Roar's 3 (${JSON.stringify(r)})`);
   ok(pick(swampert, ["Fire"], "Magcargo 1", "Ninetales 1").slot === 2, "...whichever slot it is in");
+  // STAB in the fallback is read off the FAINTED mon. Houndoom's best is
+  // Shadow Ball 3 (neutral); Ninetales's Roar is 3 -- or 4 when the fallen
+  // mon was Normal-type. Fainted Normal: Ninetales; fainted Fire: the tie
+  // goes to the first slot, Houndoom.
+  ok(pick(swampert, ["Normal"], "Houndoom 1", "Ninetales 1").slot === 2 && pick(swampert, ["Fire"], "Houndoom 1", "Ninetales 1").slot === 1,
+    "fallback STAB comes from the fainted mon's types");
   // A teammate your types cannot touch is never picked by typing: vs
   // Metagross, Houndoom (Dark/Fire) scores 5 * 0 (Psychic -> Dark) = 0 even
   // though Flamethrower is super effective. Machamp (20) is tried, has
