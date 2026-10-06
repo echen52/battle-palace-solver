@@ -120,6 +120,12 @@ const start = T.teamStart(tctx, 0);
   const s = M.solveMC(tctx, start, { budgetMs: 20000, seed: 3 });
   const agree = r.levers.every((l, i) => Math.abs(l.score - s.levers[i].score) <= l.margin + s.levers[i].margin);
   ok(agree, `parallel and single-thread agree within margins (${r.levers.map((l, i) => `${l.score.toFixed(3)}/${s.levers[i].score.toFixed(3)}`).join(", ")})`);
+  // A budget the exact first turn alone overruns (the streak sim's 2 s against
+  // a 3 s root): the levers still get their rollouts -- before the fix every
+  // open lever came back with 0 and its open share scored as 0.
+  const tight = await MP.solveMCParallel(tctx, start, { budgetMs: 1, workers: 4 });
+  ok(tight.levers.every((l) => l.exactOpen === 0 || l.rollouts >= 100) && tight.levers.every((l) => near(l.pKO + l.pOppLeft + l.pLose + l.pCapped, 1, 1e-9)),
+    `a 1 ms budget still gives every open lever >= 100 rollouts (${tight.levers.map((l) => l.rollouts)}; ${tight.stoppedBy})`);
 }
 
 // ── the shared core: a mixed start, progress, stop ─────────────────────────

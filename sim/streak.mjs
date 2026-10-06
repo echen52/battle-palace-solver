@@ -28,13 +28,19 @@ import { getOpponentConfig } from "../engine/opponent-adapter.js";
 import { rng } from "../engine/montecarlo.js";
 import { rootActions } from "../engine/solve.js";
 import { runSolve } from "../engine/solve-core.js";
-import { makeDraw, seedOf, challengeOf, stageOf, FIRST_LATE } from "./draw.mjs";
+import { makeDraw, seedOf, challengeOf, stageOf, isSpenser, FIRST_LATE } from "./draw.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith("--") ? [...a, [x.slice(2), all[i + 1]]] : a), []));
 const TEAM_FILE = args.team, OUT = args.out;
 const BATTLES = Number(args.battles ?? 1000), SEED = Number(args.seed ?? 1), FROM = Number(args.from ?? 0);
 const BUDGET = Number(args.budget ?? 3000), WORKERS = Number(args.workers ?? Math.min(12, os.cpus().length - 1));
 const TURN_CAP = 400;
+// --only 63,84 / --only spenser: play just those battle numbers (n);
+// --trace <file>: write each turn (both mons, HP, the levers' scores, what
+// happened) as text.
+const ONLY = args.only == null ? null : args.only === "spenser" ? "spenser" : new Set(args.only.split(",").map(Number));
+const TRACE = args.trace ?? null;
+const trace = (line) => { if (TRACE) fs.appendFileSync(TRACE, line + "\n"); };
 if (!TEAM_FILE || !OUT) throw new Error("usage: --team <file> --out <jsonl> [--battles N --seed S --budget ms --from i --workers w]");
 
 const team = buildTeam(fs.readFileSync(TEAM_FILE, "utf8"));
@@ -77,7 +83,7 @@ async function solve(B, s, spec, seed) {
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;
   const best = r.levers.reduce((bi, l, i) => (l.score > r.levers[bi].score ? i : bi), 0);
-  const out = { action: actions[best], value: r.levers[best].score };
+  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score]) };
   solveCache.set(key, out);
   return out;
 }
@@ -104,15 +110,32 @@ async function playBattle(i) {
   const note = () => { if (!seen.includes(s.oppActive)) seen.push(s.oppActive); };
   let result = null, turn = 0, decisions = 0, switches = 0;
   const t0 = Date.now();
+  const name = (a) => (a === "stay" ? "stay" : `switch to ${B.team[a.switchTo].species}`);
+  const extra = (st, side) => {
+    const bits = [];
+    if (st[side + "Status"]) bits.push(st[side + "Status"]);
+    const stg = Object.entries(st[side + "Stages"] ?? {}).filter(([, v]) => v).map(([k, v]) => `${k}${v > 0 ? "+" : ""}${v}`);
+    if (stg.length) bits.push(stg.join(" "));
+    if (st[side + "SubstituteHP"] > 0) bits.push("Sub");
+    return bits.length ? ` [${bits.join(", ")}]` : "";
+  };
+  const where = (st) => `${B.team[st.youActive].species} ${st.yourHpPct.toFixed(0)}%${extra(st, "you")} vs ${B.oppTeam[st.oppActive].species} ${st.oppHpPct.toFixed(0)}%${extra(st, "opp")}`
+    + (B.oppTeam[st.oppActive].ability === "Truant" ? (L.vf(st, "oppTruantLoaf") ? " (Slaking loafs next)" : " (Slaking acts next)") : "");
+  trace(`\n=== battle ${n}: ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}) ===`);
   for (; turn < TURN_CAP && !result; turn++) {
-    let action = "stay";
+    let action = "stay", levers = null;
+    const before = where(s);
     if (T.aliveBench(s).length > 0) {
-      action = (await solve(B, s, specFor(d, n, s, seen), seedOf(SEED, "solve", n, turn))).action;
+      const sv = await solve(B, s, specFor(d, n, s, seen), seedOf(SEED, "solve", n, turn));
+      action = sv.action; levers = sv.levers;
+      if (process.env.DUMP_LOW && sv.value < Number(process.env.DUMP_LOW)) fs.appendFileSync(TRACE + ".states", JSON.stringify({ n, turn: turn + 1, spec: specFor(d, n, s, seen), abilities: d.abilities, keys: d.keys, s }) + "\n");
       decisions++;
       if (action !== "stay") switches++;
     }
     const r = pick(Bt.battleTurn(B, s, action));
     s = r.state; note();
+    trace(`turn ${turn + 1}: ${before} -> ${name(action)}${levers ? `  [${levers.map(([a, v]) => `${name(a)} ${v.toFixed(3)}`).join(", ")}]` : ""}`
+      + `\n    you: ${r.chose?.you ?? "-"} | they: ${r.chose?.opp ?? "-"}${r.label && r.label.trim() !== ";" ? `  (${r.label.trim()})` : ""}\n    now ${where(s)}`);
     if (r.outcome === "replace") {
       const cands = T.aliveBench(s);
       let j = cands[0];
@@ -126,10 +149,12 @@ async function playBattle(i) {
         decisions++;
       }
       s = Bt.replaceYours(B, s, j); note();
+      trace(`    fainted -> send in ${B.team[j].species}; now ${where(s)}`);
     } else if (r.outcome) {
       result = r.outcome;
     }
   }
+  trace(`result: ${result ?? "turnCap"}`);
   return { i, n, trainer: d.trainer, keys: d.keys, abilities: d.abilities, iv: d.iv, result: result ?? "turnCap", turns: turn,
     decisions, switches, youLeft: result === "win" ? 1 + T.aliveBench(s).length : 0, ms: Date.now() - t0 };
 }
@@ -141,6 +166,7 @@ let played = 0;
 try {
   for (let i = FROM; i < BATTLES; i++) {
     if (done.has(i)) continue;
+    if (ONLY === "spenser" ? !isSpenser(FIRST_LATE + i) : ONLY && !ONLY.has(FIRST_LATE + i)) continue;
     let line;
     try { line = await playBattle(i); }
     catch (e) { line = { i, n: FIRST_LATE + i, result: "error", error: e.message.slice(0, 200) }; }

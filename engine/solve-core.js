@@ -80,7 +80,10 @@ export async function runSolve({ pool, init, actions, budgetMs = 30000, seed = 1
     const e = ests();
     if (signal?.aborted) stoppedBy = "stopped";
     else if (separated(e, minRollouts)) stoppedBy = "separated";
-    else if (Date.now() - t0 > budgetMs) stoppedBy = "budget";
+    // The budget never stops a lever short of minRollouts: an exact first turn
+    // that ran past it would otherwise leave every open lever scored with no
+    // rollouts at all (its open share counted as 0).
+    else if (Date.now() - t0 > budgetMs && open.every((i) => tallies[i].n >= minRollouts)) stoppedBy = "budget";
     return !!stoppedBy;
   };
   const feed = (wi) => {

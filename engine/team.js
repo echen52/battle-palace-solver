@@ -291,7 +291,10 @@ export function teamTurn(tctx, s, action) {
   } else {
     throw new Error(`teamTurn: action must be "stay" or { switchTo: j }, got ${JSON.stringify(action)}`);
   }
-  return res.map((r) => ({ p: r.p, state: r.state, label: r.label, outcome: outcomeOf(r.state) }));
+  // chose: what each side picked this turn (for traces; "switched" = you switched).
+  const pick = (c) => (c ? (c.loaf ? `${c.move} (loafed: ${c.loaf})` : c.move) : null);
+  return res.map((r) => ({ p: r.p, state: r.state, label: r.label, outcome: outcomeOf(r.state),
+    chose: { you: action === "stay" ? pick(r.you) : "switched", opp: pick(r.opp) } }));
 }
 function outcomeOf(s) {
   if (s.oppDraggedOut) return "oppLeft";
@@ -324,7 +327,7 @@ function switchTurn(tctx, s, j, ctx) {
         const oppMove = oppActs ? o.move : tctx.opp.moves[0];
         for (const r of L.resolveTurn(ctxIn, sIn, tctx.team[j].moves[0], oppMove, { qc: draw.resolveQc, loaf, order: ["you", "opp"] })) {
           const next = r.state.yourHpPct > 0 && r.state.oppHpPct > 0 ? updateLowHpLatches(engineCtx(tctx, r.state), r.state) : r.state;
-          out.push({ p: draw.p * o.p * b.p * r.p, state: next, label: `switch to ${tctx.team[j].species}${pursuit ? " (Pursuit)" : ""}; ${r.label}` });
+          out.push({ p: draw.p * o.p * b.p * r.p, state: next, label: `switch to ${tctx.team[j].species}${pursuit ? " (Pursuit)" : ""}; ${r.label}`, opp: o });
         }
       }
     }

@@ -114,7 +114,7 @@ export function battleTurn(B, s, action) {
     const rs = d.slot == null ? T.teamTurn(view(B, s), s, action) : oppSwitchTurn(B, s, d.slot, action);
     for (const r of rs) {
       if (r.outcome === "oppLeft" || r.state.oppDraggedOut) throw new Error(`battleTurn: the opponent left the field unhandled (${r.label})`);
-      out.push({ p: d.p * r.p, ...settle(B, r.state) });
+      out.push({ p: d.p * r.p, ...settle(B, r.state), label: r.label, chose: r.chose ?? null });
     }
   }
   return out;
@@ -136,7 +136,7 @@ function oppSwitchTurn(B, s, j, action) {
     const s2 = oppSwitchIn(B, s1, j, { firstTurn: 2 });
     const ctx = T.engineCtx(view(B, s2), s2);
     for (const r of L.resolveTurn(ctx, s2, B.team[s2.youActive].moves[0], B.oppTeam[j].moves[0], { loaf: { you: "switched", opp: "switched" }, order: ["you", "opp"] })) {
-      out.push({ p: r.p, state: settleLatches(B, r.state), label: `you switch to ${B.team[action.switchTo].species}; ${label}` });
+      out.push({ p: r.p, state: settleLatches(B, r.state), label: `you switch to ${B.team[action.switchTo].species}; ${label}`, chose: { you: "switched", opp: "switched" } });
     }
     return out;
   }
@@ -149,13 +149,14 @@ function oppSwitchTurn(B, s, j, action) {
         && !L.vf(s0, "youTruantLoaf");
       const before = pursuit ? L.resolveSingleAction(ctx, s0, "you", "Pursuit", { pursuitSwitch: true }) : [{ p: 1, state: s0 }];
       for (const b of before) {
-        if (b.state.oppHpPct <= 0) { out.push({ p: draw.p * y.p * b.p, state: b.state, label: "Pursuit -- and it fell" }); continue; }
+        if (b.state.oppHpPct <= 0) { out.push({ p: draw.p * y.p * b.p, state: b.state, label: "Pursuit -- and it fell", chose: { you: "Pursuit", opp: "switched" } }); continue; }
         const sIn = oppSwitchIn(B, b.state, j, { firstTurn: 2 });
         const ctxIn = T.engineCtx(view(B, sIn), sIn);
         const youAct = !pursuit;
         const loaf = { opp: "switched", you: youAct ? y.loaf : "switched" };
         for (const r of L.resolveTurn(ctxIn, sIn, youAct ? y.move : B.team[s.youActive].moves[0], B.oppTeam[j].moves[0], { qc: draw.resolveQc, loaf, order: ["opp", "you"] })) {
-          out.push({ p: draw.p * y.p * b.p * r.p, state: settleLatches(B, r.state), label: `${label}${pursuit ? " (Pursuit)" : ""}; ${r.label}` });
+          out.push({ p: draw.p * y.p * b.p * r.p, state: settleLatches(B, r.state), label: `${label}${pursuit ? " (Pursuit)" : ""}; ${r.label}`,
+            chose: { you: y.loaf ? `${y.move} (loafed: ${y.loaf})` : y.move, opp: "switched" } });
         }
       }
     }

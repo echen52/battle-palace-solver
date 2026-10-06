@@ -132,7 +132,8 @@ export function solveMC(tctx, s0, { weights, budgetMs = 10000, seed = 1, round =
     const ests = levers.map((L) => estimate(L.root, L.tally));
     if (separated(ests, minRollouts)) { stoppedBy = "separated"; break; }
     if (targetMargin > 0 && ests.every((e) => e.margin <= targetMargin)) { stoppedBy = "margin"; break; }
-    if (Date.now() - t0 > budgetMs) break;
+    // as solve-core: the budget never stops an open lever short of minRollouts
+    if (Date.now() - t0 > budgetMs && ests.every((e) => e.exactOpen === 0 || e.rollouts >= minRollouts)) break;
   }
   return { levers: levers.map((L) => estimate(L.root, L.tally)), stoppedBy, ms: Date.now() - t0 };
 }
