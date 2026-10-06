@@ -181,6 +181,39 @@ Pages from main / root -> https://echen52.github.io/battle-palace-solver/ (root
 index.html forwards to site/). Every push needs the user's OK. Theme: burnt
 orange (styles.css header comment lists the roles and computed contrast).
 
+## Phase E: the streak sim (started 2026-10-05; user asked)
+
+Goal: which of the user's teams make longer Palace streaks. User decisions
+(2026-10-05): LATE POOL only (they reach it anyway); your switches decided by
+the SOLVER (policy b) -- "the whole point ... was to optimize the switch".
+Not policy (a) (never switch).
+
+Steps:
+1. DONE (72303a6): the opponent's three as a real team -- engine/battle.js
+   (battleStart / view / oppSwitchIn via the mirror / Roar on them via
+   ctx.onDragOpp / oppReplace = GetMostSuitable vs your mon out / settle:
+   draw = loss). tests/test-battle.mjs 19, 6/6 mutations caught.
+   Smoke run (user's team, 60 random late battles, always stay): 135 ms a
+   battle; 3/60 stopped on the OPPONENT'S BATON PASS -> must be ported.
+2. Opponent Baton Pass: SwitchInClearSetData's BP branch (battle_main.c:
+   3158-3217: stages, confusion, Focus Energy, Substitute + its HP, escape
+   prevention, Curse, Leech Seed, Lock-On, Perish + timer, Ingrain, Mud/Water
+   Sport), the AI's pick (OpponentHandleChoosePokemon -> GetMostSuitable with
+   gCurrentMove = Baton Pass, not MOVE_NONE), and the rest of the turn (if
+   the passer moved first, your move lands on the newcomer).
+3. ShouldSwitch (battle_ai_switch_items.c:428-527): runs for every trainer
+   action in the Palace (OpponentHandleChooseAction -> AI_TrySwitchOrUseItem,
+   only BATTLE_TYPE_TRAINER-gated). Port line by line, incl. its Random()s;
+   replaces team.js's perish shortcut (tctx.oppSwitchHandled).
+4. Trainer draw for a battle: GetRandomScaledFrontierTrainerId + no repeat
+   within a challenge (battle_tower.c:1084-1099); party by FillTrainerParty;
+   abilities by personality bit.
+5. Policy b: the solver at your decision points, as the page would be used
+   (it sees challenge/battle and the mons revealed, not the trainer). Cost is
+   the issue (~6 s a decision): measure, then cache (e.g. the first decision
+   of a battle depends only on the lead set / IV / ability).
+6. Run the user's teams; report per-battle win rate and streak with CIs.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
