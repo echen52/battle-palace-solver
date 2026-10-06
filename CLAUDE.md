@@ -195,19 +195,24 @@ Steps:
    draw = loss). tests/test-battle.mjs 19, 6/6 mutations caught.
    Smoke run (user's team, 60 random late battles, always stay): 135 ms a
    battle; 3/60 stopped on the OPPONENT'S BATON PASS -> must be ported.
-2. Opponent Baton Pass: SwitchInClearSetData's BP branch (battle_main.c:
-   3158-3217: stages, confusion, Focus Energy, Substitute + its HP, escape
-   prevention, Curse, Leech Seed, Lock-On, Perish + timer, Ingrain, Mud/Water
-   Sport), the AI's pick (OpponentHandleChoosePokemon -> GetMostSuitable with
-   gCurrentMove = Baton Pass, not MOVE_NONE), and the rest of the turn (if
-   the passer moved first, your move lands on the newcomer).
-3. ShouldSwitch (battle_ai_switch_items.c:428-527): runs for every trainer
-   action in the Palace (OpponentHandleChooseAction -> AI_TrySwitchOrUseItem,
-   only BATTLE_TYPE_TRAINER-gated). Port line by line, incl. its Random()s;
-   replaces team.js's perish shortcut (tctx.oppSwitchHandled).
-4. Trainer draw for a battle: GetRandomScaledFrontierTrainerId + no repeat
-   within a challenge (battle_tower.c:1084-1099); party by FillTrainerParty;
-   abilities by personality bit.
+2. DONE (12ac281): opponent Baton Pass -- switchIn's batonPass option
+   (battle_main.c:3158-3217 carry list), its pick = GetMostSuitable (BP vs
+   MOVE_NONE: same power-0 Normal fallback), passing first -> your move lands on
+   the newcomer (resolveTurnWithOrder's second action is now a function).
+   Fixed on the way: a leaver's trap on its foe is lifted (oppCantEscape).
+3. DONE (e933868, d7fff96): ShouldSwitch -> engine/should-switch.js, every
+   Random() as odds; AI_TypeCalc in next-in.js; new engine field
+   you/oppLastLanded (gLastLandedMoves; corpus.mjs strips it, fork equivalence
+   still 7178/7178); locked mons choose nothing. test-should-switch 35;
+   mutations 10/10 caught (after added cases).
+4. DONE (4b4713f): sim/draw.mjs (late-pool trainer/party draw per (seed, n),
+   Spenser Gold at 63/84/...) + sim/streak.mjs (solver every turn on a
+   persistent worker pool; replacements by solving each candidate).
+   test-sim-draw 8. User team files: teams/user-test-team.txt (Swampert),
+   teams/mlsuicune.txt (Suicune). User: ~1000 battles per team (not 3000).
+   Pilot (budget 3 s, 12 workers): ~4.4 s a solve (exact root ~0.6 s; half
+   the solves stop at the budget), 150 s a battle (one 85-turn stall battle).
+   Plan: budget 2 s, both teams at once, 7 workers each.
 5. Policy b: the solver at your decision points, as the page would be used
    (it sees challenge/battle and the mons revealed, not the trainer). Cost is
    the issue (~6 s a decision): measure, then cache (e.g. the first decision
