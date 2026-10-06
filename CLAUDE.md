@@ -42,12 +42,12 @@ AI interpreter 3,872/3,873 ROM decisions). See `docs/PROVENANCE.md`. The fork:
 | test-engine-fixes | Protect reset, Destiny Bond timing (5/8 fail on the unfixed engine) |
 | test-team | 33: classification, carried vs left-behind fields, Toxic/sleep on return, Spikes 1/8 1/6 1/4, Intimidate / Sand Stream / Truant on entry, switch order, Pursuit x2, Roar 50/50 and its blocks, Baton Pass, faint/replace/lose, end of turn after a KO, Perish switch; 300+ random team turns sum to 1 |
 | test-score | 46: Showdown reader on the user's team (`teams/user-test-team.txt`; stats by hand, bad lines throw), every score term on hand-built positions, monWeights, outcome chances on a real turn. 5/5 mutations caught |
-| test-next-in | 37: trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
+| test-next-in | 52 (11 Spenser: his 6 sets parsed from the decomp, hand-worked replacements incl. Lapras/Suicune vs a Grass type, errors; 6/6 Spenser mutations caught across next-in/ui-logic/browser): trainer table vs decomp range comments + the Palace Predictor's bracket pools (7/8 agree; challenge 1 differs by exactly the 4 BUG_CATCHER_1_EXTRA macro args the predictor's generator dropped), the literal FillTrainerParty loop simulated (400k) vs the exact teammate distribution, hand-worked GetMostSuitableMonToSwitchInto cases (typing pass, fallback, Levitate, ties, fainted-mon STAB), best-hit share, scorer hook. 8/8 mutations caught |
 | test-solve | 17: exact search vs an unmerged brute force at 2 turns (every lever, worn-down position incl. faints/replacements; real start), a rule-decided fight to completion (1% in permanent sand), the replacement rule (best not first), budget + frontier (finished + open = 1). 5/5 mutations caught. ~11 s |
 | test-montecarlo | 16: estimator algebra + Wilson margins + separation rule; MC vs exact P(KO/lose within 2 turns) within 3 sd; exact-only levers get no rollouts; a worker's batch equals the main thread's digit for digit (next-in live in it); parallel vs single-thread within margins. 6/6 mutations caught. ~45 s |
 | test-rolls | 19: exact rolls through the team layer, a KO threshold the point estimate misses, drawn = enumerated (P(KO), mean HP; multi-hit per-hit draws vs grouped enumeration), rollout() draws the rolls, multi-hit into a Substitute, the root cap + fallback, workers carry the roll mode, solveFight. 5/5 mutations caught |
-| test-ui-logic | 36: every page input onto its engine field (HP, status, bad poison counter, bench, stages vs switch-in Intimidate, confusion index, Substitute HP, items, first turn, weather + turns, screens + turns, Spikes, low-HP latch auto/manual, sleep mix weights, 1st/2nd/3rd opponent -> next-in + reserves), set list, IV odds, result rows / ties. 6/6 mutations caught |
-| test-site-browser | 13: the page in headless Chromium (Playwright from battle_arena_sim/node_modules): team paste, set card, IV default, opponent's bars = turnChoices, page solve vs solveFight in Node (best + every score within margins), Stop, saved team over a reload, no page error |
+| test-ui-logic | 46 (+10 Spenser: brainFor, his list/IVs, 1st/2nd/3rd checks): every page input onto its engine field (HP, status, bad poison counter, bench, stages vs switch-in Intimidate, confusion index, Substitute HP, items, first turn, weather + turns, screens + turns, Spikes, low-HP latch auto/manual, sleep mix weights, 1st/2nd/3rd opponent -> next-in + reserves), set list, IV odds, result rows / ties. 6/6 mutations caught |
+| test-site-browser | 24 (+ set dropdown, + Spenser Gold auto-pick and page vs Node solve vs his Arcanine): the page in headless Chromium (Playwright from battle_arena_sim/node_modules): team paste, set card, IV default, opponent's bars = turnChoices, page solve vs solveFight in Node (best + every score within margins), Stop, saved team over a reload, no page error |
 | test-pp | PP spending rules, running out, Leppa, Spite, Grudge, Transform, uncapped durations, Perish Song (21/31 fail with ARENA_COMPAT set) |
 
 Workflow rule learned the hard way: **commit before any mutation check** —
@@ -167,7 +167,15 @@ browser twin of montecarlo-parallel.js; shared engine/solve-core.js +
 engine/worker-handler.js). Saved teams: localStorage "palaceSolver.savedTeams"
 (all echen52 Pages sites share one origin -- the prefix keeps it apart).
 Not on the page yet: score weights (defaults used), PP, Leech Seed / Curse /
-Perish / other volatiles, Open Level, Frontier Brain battles.
+Perish / other volatiles, Open Level.
+SPENSER (2026-10-05, a1f03a2): the Palace Frontier Brain is on the page and in
+next-in (BRAIN_TEAMS from frontier_util.c sFrontierBrainsMons, party order;
+lead = slot 0; fixed IV; replacement = GetMostSuitable over his slots 1-2).
+Brain control auto-picks Silver at challenge 3 battle 7 and Gold at challenge 6
+battle 7 (a default: holding Silver but not Gold, streak 21 is a normal
+trainer); his 63/84/... appearances sit inside 8+, picked by hand.
+TOOLING: Git Bash `sed -i` rewrites CRLF files to LF -- edit with Python
+(normalise, edit, restore CRLF) or the Edit tool.
 PUBLISHED 2026-10-05: origin = github.com/echen52/battle-palace-solver (public),
 Pages from main / root -> https://echen52.github.io/battle-palace-solver/ (root
 index.html forwards to site/). Every push needs the user's OK. Theme: burnt
