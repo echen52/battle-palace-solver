@@ -1,7 +1,7 @@
 /* Battle Palace Solver — laid out like the Battle Arena solver (your side,
    the battle, the opponent). Burnt-orange theme on warm, low-glare darks,
    as the Arena page has its wood-gold. Roles kept apart:
-     --brand   = filled chrome: header band, primary button, selected toggle
+     --brand   = filled chrome: primary button, selected toggle
      --accent  = the same orange lightened for text: titles, borders, focus
      --best    = ONLY the recommendation (sage green, so it never reads as chrome)
      --tie     = "too close to call" (soft blue)
@@ -27,9 +27,8 @@
 [hidden] { display: none !important; } /* rows are display:flex; hidden must still hide */
 body { font-family: monospace; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-.app-header { background: var(--brand); border-bottom: 2px solid var(--accent); padding: 14px 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.app-header h1 { font-size: 1.25rem; color: #fff; }
-.app-sub { color: #f8e4d4; font-size: 12px; }
+.app-header { padding: 14px 20px 0; } /* plain: same background as the page, no band or rule */
+.app-header h1 { font-size: 1.25rem; }
 
 .layout { display: grid; grid-template-columns: 330px minmax(380px, 1fr) 320px; gap: 16px; max-width: 1280px; margin: 0 auto; padding: 16px 20px 48px; align-items: start; }
 @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
