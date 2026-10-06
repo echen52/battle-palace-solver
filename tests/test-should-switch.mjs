@@ -100,6 +100,9 @@ Adamant Nature
   const B = battle(SHED, ["Magikarp 1", "Pidgeot 1", "Feebas 1"]);
   const o = odds(B, Bt.battleStart(B, 0));
   ok(near(o["1"], 2 / 3 + (1 / 3) * (2 / 3)) && near(o["null"], 1 / 9), `vs Wonder Guard: to Pidgeot 8/9 -- ${show(o)}`);
+  // its own mon out has a super-effective move (Pidgeot 2: Aerial Ace): no Wonder Guard switch
+  const BW = battle(SHED, ["Pidgeot 2", "Pidgeot 1", "Feebas 1"]);
+  ok(near(odds(BW, Bt.battleStart(BW, 0))["null"], 1), "vs Wonder Guard with a super-effective move of its own: it stays");
 }
 
 // ── 3. a teammate that absorbs the last landed move ───────────────────────
