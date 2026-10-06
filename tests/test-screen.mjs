@@ -104,7 +104,7 @@ Brave Nature
 - Curse
 - Rest`;
   const sc = S.makeScreen({ teamText: dbTeam, seed: 3 });
-  let used = 0, kos = 0, lockBad = 0, lockFaint = 0, metaFaints = 0, dbOk = true, skipped = 0;
+  let used = 0, kos = 0, lockBad = 0, lockFaint = 0, metaFaints = 0, dbOk = true, skipped = 0, noChoiceOk = true;
   for (let i = 0; i < 200; i++) {
     let dbKoTurns = 0, l;
     // (a battle whose Metronome calls an unported move throws by name -- Clefable 1,
@@ -115,10 +115,13 @@ Brave Nature
         && (e.chose?.you === "Destiny Bond" || e.before.youDestinyBondActive)) dbKoTurns++;
       if (e.before.youActive === 1 && e.after.youActive === 1 && e.after.yourHpPct <= 0) metaFaints++;
     } }); } catch (err) { if (!/no execution logic|no secondary executor/.test(err.message)) throw err; skipped++; continue; }
+    const trick = l.keys.some((k) => N.poolEntry(N.setId(k)).moves.includes("Trick")); // a Trick can hand them a Choice Band (battle 10: MR_MIME 3)
+    if (!trick && (l.c[0].faintedLocked || l.c[2].faintedLocked || l.c[0].lockedBadTurns || l.c[2].lockedBadTurns)) noChoiceOk = false;
     used += l.c[0].dbUsed; kos += l.c[0].dbKOs; lockBad += l.c[1].lockedBadTurns; lockFaint += l.c[1].faintedLocked;
     if (l.c[0].dbKOs !== dbKoTurns || l.c[0].dbKOs > 1) dbOk = false;
   }
   ok(used > 0 && kos > 0 && dbOk, `Brave Gengar: Destiny Bond picked ${used} times, ${kos} KOs, each matching a turn it fell with the bond up (${skipped} battles skipped: unported Metronome call)`);
+  ok(noChoiceOk, "Gengar and Swampert (no Choice item) never count as Choice-locked, unless an opponent could Trick one onto them");
   ok(skipped <= 2, "at most 2 of 200 battles hit an unported Metronome call");
   ok(lockBad > 0 && lockFaint > 0 && lockFaint <= metaFaints, `CB Metagross: ${lockBad} turns locked into a resist; ${lockFaint} faints while locked (of ${metaFaints} faints)`);
 }
