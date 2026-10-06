@@ -170,8 +170,8 @@ Not on the page yet: score weights (defaults used), PP, Leech Seed / Curse /
 Perish / other volatiles, Open Level, Frontier Brain battles.
 PUBLISHED 2026-10-05: origin = github.com/echen52/battle-palace-solver (public),
 Pages from main / root -> https://echen52.github.io/battle-palace-solver/ (root
-index.html forwards to site/). Every push needs the user's OK. Theme: forest
-green (styles.css header comment lists the roles and computed contrast).
+index.html forwards to site/). Every push needs the user's OK. Theme: burnt
+orange (styles.css header comment lists the roles and computed contrast).
 
 ## Side finding
 
