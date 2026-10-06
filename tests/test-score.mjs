@@ -36,6 +36,12 @@ const [meta, latios, swampert] = team;
   ok(swampert.stats.hp === 207 && swampert.stats.spd === 140, `Swampert stats ${JSON.stringify(swampert.stats)}`);
   ok(meta.maxPP.join() === "16,16,24,32", "max PP Ups (Meteor Mash 10 -> 16, Aerial Ace 20 -> 32)");
   ok(throws(() => SD.parseShowdownTeam("Metagross\nAbility: Clear Body\nAdamant Nature\nShiny: Yes\n- Earthquake"), /cannot read line "Shiny: Yes"/), "an unknown line throws by name");
+  // Showdown's spellings of Gen 3 moves read as the engine's (Gen 3) names.
+  const mv = (n) => SD.parseShowdownTeam(`Snorlax\nAbility: Thick Fat\nHardy Nature\n- ${n}`)[0].moves[0];
+  ok(mv("Thunder Punch") === "ThunderPunch" && mv("Extreme Speed") === "ExtremeSpeed" && mv("Soft-Boiled") === "Softboiled"
+    && mv("Feint Attack") === "Faint Attack" && mv("High Jump Kick") === "Hi Jump Kick" && mv("Vise Grip") === "Vice Grip"
+    && mv("Smelling Salts") === "SmellingSalt" && mv("Lock-On") === "Lock On" && mv("Double-Edge") === "Double-Edge", "Showdown move spellings -> Gen 3 names");
+  ok(throws(() => SD.buildTeam("Snorlax\nAbility: Thick Fat\nHardy Nature\n- U-turn"), /no base PP for "U-turn"/), "a move Gen 3 does not have still throws by name");
   ok(throws(() => SD.parseShowdownTeam("Metagross\nAbility: Clear Body\nEVs: 252 Atak\nAdamant Nature\n- Earthquake"), /cannot read "252 Atak"/), "an unknown stat throws");
   ok(throws(() => SD.parseShowdownTeam("Meta (Metagross)\nAbility: Clear Body\nAdamant Nature\n- Earthquake"), /nicknames/), "nicknames are refused, not misread");
 }

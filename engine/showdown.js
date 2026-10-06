@@ -15,6 +15,18 @@
 // long forms people type by hand (SpAtk, SpDef, ...).
 
 import { buildPlayerMon } from "./team.js";
+import { MOVES } from "./logic.js";
+
+// Move names: Showdown writes today's spellings ("Thunder Punch", "Extreme
+// Speed", "Self-Destruct", "Soft-Boiled"); the engine keeps Gen 3's
+// ("ThunderPunch", "ExtremeSpeed", "Selfdestruct", "Softboiled"). Matched
+// ignoring case, spaces and punctuation (no two Gen 3 names collide that
+// way), plus the four renamed since Gen 3. Anything else is passed through,
+// and an unknown move still throws by name in buildMon.
+const squash = (n) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+const RENAMED = { feintattack: "Faint Attack", visegrip: "Vice Grip", highjumpkick: "Hi Jump Kick", smellingsalts: "SmellingSalt" };
+const BY_KEY = new Map(Object.keys(MOVES).map((n) => [squash(n), n]));
+export const gen3MoveName = (name) => (MOVES[name] ? name : RENAMED[squash(name)] ?? BY_KEY.get(squash(name)) ?? name);
 
 const STAT = {
   hp: "hp", atk: "atk", attack: "atk", def: "def", defense: "def",
@@ -47,7 +59,7 @@ export function parseShowdownTeam(text) {
       else if ((m = line.match(/^EVs:\s*(.+)$/))) cfg.evs = statSpread(m[1], line);
       else if ((m = line.match(/^IVs:\s*(.+)$/))) cfg.ivs = statSpread(m[1], line);
       else if ((m = line.match(/^(\w+)\s+Nature$/))) cfg.nature = m[1];
-      else if ((m = line.match(/^-\s*(.+)$/))) cfg.moves.push(m[1].trim());
+      else if ((m = line.match(/^-\s*(.+)$/))) cfg.moves.push(gen3MoveName(m[1].trim()));
       else throw new Error(`showdown: cannot read line "${line}" (${cfg.species})`);
     }
     if (!cfg.ability) throw new Error(`showdown: ${cfg.species} has no Ability line`);
