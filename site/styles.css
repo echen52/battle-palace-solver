@@ -1,17 +1,25 @@
-/* Battle Palace Solver — the Palace family's look (dark, monospace, cyan;
-   tokens from the Battle Palace Assistant / Palace Predictor), laid out like
-   the Battle Arena solver: your side, the battle, the opponent. */
+/* Battle Palace Solver — laid out like the Battle Arena solver (your side,
+   the battle, the opponent). Forest-green theme, as the Arena page has its
+   wood-gold. Roles kept apart:
+     --forest  = filled chrome: header band, primary button, selected toggle
+     --accent  = the same green lightened for text: titles, borders, focus
+     --best    = ONLY the recommendation (gold, so it never reads as chrome)
+     --tie     = "too close to call"
+   WCAG contrast (computed): accent on bg 7.9:1, on surface 5.9:1; muted on
+   panel 6.3:1; white on forest 6.2:1; best on bg 10.3:1; tie on bg 7.5:1. */
 
 :root {
-  --bg: #1c1c1c;
-  --panel: #2a2a2a;
-  --surface: #3d3d3d;
-  --border: #3d3d3d;
-  --text: #eee;
-  --muted: #888;
-  --accent: #00d9ff;
-  --best: #60c880;
-  --tie: #e0c060;
+  --bg: #111a13;        /* near-black, green-tinted */
+  --panel: #18251b;
+  --surface: #21342a;   /* inputs, buttons */
+  --border: #2f4a37;
+  --divider: #26392c;
+  --text: #e6efe7;
+  --muted: #93a898;
+  --forest: #1f6f2e;    /* the main colour */
+  --accent: #6fbf73;
+  --best: #e8c15a;
+  --tie: #e8946a;
   --error: #ff6b6b;
 }
 
@@ -19,15 +27,15 @@
 [hidden] { display: none !important; } /* rows are display:flex; hidden must still hide */
 body { font-family: monospace; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-.app-header { border-bottom: 2px solid var(--border); padding: 14px 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.app-header h1 { font-size: 1.25rem; }
-.app-sub { color: var(--muted); font-size: 12px; }
+.app-header { background: var(--forest); border-bottom: 2px solid var(--accent); padding: 14px 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.app-header h1 { font-size: 1.25rem; color: #fff; }
+.app-sub { color: #d5e8d8; font-size: 12px; }
 
 .layout { display: grid; grid-template-columns: 330px minmax(380px, 1fr) 320px; gap: 16px; max-width: 1280px; margin: 0 auto; padding: 16px 20px 48px; align-items: start; }
 @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
 
 .panel { background: var(--panel); border: 2px solid var(--border); padding: 12px; }
-.panel h2 { font-size: 1rem; margin-bottom: 10px; color: var(--accent); }
+.panel h2 { font-size: 1rem; margin-bottom: 10px; color: var(--accent); border-bottom: 1px solid var(--divider); padding-bottom: 6px; }
 .panel h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 6px; }
 .panel h3 span { color: var(--text); text-transform: none; letter-spacing: 0; }
 
@@ -37,19 +45,20 @@ body { font-family: monospace; font-size: 14px; background: var(--bg); color: va
 .field-row > label.chk-label { min-width: 0; color: var(--text); }
 
 select, input[type="text"], input[type="number"], textarea {
-  background: var(--surface); border: 1px solid var(--panel); color: var(--text); font-family: monospace; font-size: 13px; padding: 5px 7px; outline: none;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 13px; padding: 5px 7px; outline: none;
 }
 select:focus, input:focus, textarea:focus { border-color: var(--accent); }
-input::placeholder, textarea::placeholder { color: #666; }
+input::placeholder, textarea::placeholder { color: #7d9482; }
 input[type="number"] { width: 64px; }
 input[type="checkbox"] { accent-color: var(--accent); }
 .set-input { flex: 1; min-width: 160px; }
 textarea { width: 100%; resize: vertical; min-height: 120px; }
 
-.btn { padding: 6px 12px; font-family: monospace; font-size: 13px; cursor: pointer; border: 2px solid var(--panel); background: var(--surface); color: var(--text); }
+.btn { padding: 6px 12px; font-family: monospace; font-size: 13px; cursor: pointer; border: 2px solid var(--border); background: var(--surface); color: var(--text); }
 .btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.45; cursor: default; }
-.btn-primary { border-color: var(--accent); color: var(--accent); }
+.btn-primary { background: var(--forest); border-color: var(--forest); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #267f37; border-color: var(--accent); color: #fff; }
 .btn-small { padding: 3px 8px; }
 .btn-row { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; align-items: center; }
 .btn-row input[type="text"] { flex: 1; min-width: 100px; }
@@ -57,7 +66,7 @@ textarea { width: 100%; resize: vertical; min-height: 120px; }
 /* segmented radio buttons */
 .seg input[type="radio"] { display: none; }
 .seg label.btn { padding: 4px 12px; }
-.seg input[type="radio"]:checked + label.btn { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+.seg input[type="radio"]:checked + label.btn { border-color: var(--forest); color: #fff; background: var(--forest); }
 
 /* your mons */
 .mon-card { border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; margin-top: 10px; }
@@ -92,7 +101,7 @@ textarea { width: 100%; resize: vertical; min-height: 120px; }
 .options-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .options-table th { color: var(--muted); font-weight: normal; text-align: right; padding: 4px; border-bottom: 1px solid var(--border); }
 .options-table th:first-child, .options-table td:first-child { text-align: left; }
-.options-table td { padding: 5px 4px; text-align: right; border-bottom: 1px solid #333; white-space: nowrap; }
+.options-table td { padding: 5px 4px; text-align: right; border-bottom: 1px solid var(--divider); white-space: nowrap; }
 .options-table tr.best td:first-child { color: var(--best); }
 .options-table tr.tie td:first-child { color: var(--tie); }
 .options-table .pm { color: var(--muted); font-size: 11px; }
@@ -101,7 +110,7 @@ textarea { width: 100%; resize: vertical; min-height: 120px; }
 
 .choice-bars .cb-row { display: grid; grid-template-columns: 1fr 44px; gap: 6px; font-size: 11px; margin-bottom: 3px; align-items: center; }
 .choice-bars .cb-name { position: relative; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.choice-bars .cb-fill { position: absolute; inset: 0 auto 0 0; background: rgba(0, 217, 255, 0.18); z-index: 0; }
+.choice-bars .cb-fill { position: absolute; inset: 0 auto 0 0; background: rgba(111, 191, 115, 0.22); z-index: 0; }
 .choice-bars .cb-name span { position: relative; z-index: 1; }
 .choice-bars .cb-p { text-align: right; color: var(--muted); }
 #savedTeams { flex: 1; min-width: 0; }
