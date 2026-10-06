@@ -100,6 +100,7 @@ const spenser = () => ({ team: ME, oppTeam: SILVER.map((k) => opp(k, k.includes(
   ok(near(tot, 1) && near(by[1] ?? 0, 0.5 * (by[1] + by[2])) && near(by[2] ?? 0, 0.5 * (by[1] + by[2])) && (by[1] + by[2]) > 0.5,
     `your Roar drags in either teammate evenly (slot 1 ${(by[1] ?? 0).toFixed(3)}, slot 2 ${(by[2] ?? 0).toFixed(3)}; rest = Roar failed / missed)`);
   ok(res.every((r) => r.state.oppDraggedOut === false), "the flag is cleared once the newcomer is in");
+  ok(res.filter((r) => r.state.oppActive !== 0).every((r) => r.state.oppMonFirstTurn === true), "a mon dragged in mid-turn: its NEXT turn is its first (Fake Out works then)");
 }
 
 // ── their replacement after a faint ────────────────────────────────────────
