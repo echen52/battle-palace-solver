@@ -1,0 +1,79 @@
+Heracross @ Choice Band
+Ability: Guts
+Level: 50
+EVs: 4 HP / 252 Atk / 12 Def / 4 SpD / 236 Spe
+Sassy Nature
+- Megahorn
+- Brick Break
+- Rock Slide
+- Earthquake
+
+Ursaring @ Choice Band
+Ability: Guts
+Level: 50
+EVs: 4 HP / 252 Atk / 252 Spe
+Sassy Nature
+- Double-Edge
+- Earthquake
+- Rock Slide
+- Aerial Ace
+
+Aerodactyl @ Choice Band
+Ability: Rock Head
+Level: 50
+EVs: 252 Atk / 4 SpD / 252 Spe
+Sassy Nature
+- Rock Slide
+- Earthquake
+- Aerial Ace
+- Double-Edge
+
+Slaking @ Choice Band
+Ability: Truant
+Level: 50
+EVs: 4 HP / 252 Atk / 252 Spe
+Sassy Nature
+- Double-Edge
+- Earthquake
+- Shadow Ball
+- Rock Slide
+
+Tauros @ Choice Band
+Ability: Intimidate
+Level: 50
+EVs: 4 HP / 252 Atk / 252 Spe
+Sassy Nature
+- Double-Edge
+- Earthquake
+- Iron Tail
+
+Snorlax @ Leftovers
+Ability: Immunity
+Level: 50
+EVs: 36 HP / 220 Def / 252 SpD
+Brave Nature
+- Body Slam
+- Amnesia
+- Curse
+- Rest
+
+Registeel @ Leftovers
+Ability: Clear Body
+Level: 50
+EVs: 252 HP / 252 Atk / 4 Def
+Brave Nature
+- Hidden Power [Steel]
+- Rest
+- Amnesia
+- Curse
+
+Regice @ Leftovers
+Ability: Clear Body
+Level: 50
+EVs: 252 HP / 252 Def / 4 Spe
+Modest Nature
+IVs: 0 Atk
+- Ice Beam
+- Thunderbolt
+- Amnesia
+- Rest

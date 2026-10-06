@@ -22,6 +22,25 @@ const cfgs = SD.parseShowdownTeam(text);
 const team = SD.buildTeam(text);
 const [meta, latios, swampert] = team;
 {
+  // "Hidden Power [Type]" (Gen 3: the type comes from the IVs)
+  const reg = (ivs) => `Registeel @ Leftovers
+Ability: Clear Body
+Level: 50
+EVs: 252 HP / 252 Atk
+Brave Nature
+${ivs}- Hidden Power [Steel]
+- Rest
+- Amnesia
+- Curse`;
+  const entered = SD.buildTeam(reg(""))[0];
+  ok(entered.moves[0] === "Hidden Power" && entered.hiddenPower.type === "Steel" && entered.hiddenPower.power === 70, "Hidden Power [Steel] with no IVs: entered as Steel 70");
+  const fromIvs = SD.buildTeam(reg("IVs: 30 SpD\n"))[0];
+  ok(fromIvs.hiddenPower.type === "Steel" && fromIvs.hiddenPower.power === 70, "...with IVs 30 SpD (the rest 31): those IVs give Steel 70 (Cmd_hiddenpowercalc)");
+  let threw = null; try { SD.buildTeam(reg("IVs: 30 Atk\n")); } catch (e) { threw = e.message; }
+  // IVs 30 Atk: typeBits 61 -> 15*61/63 = 14, +1 = 15, past TYPE_MYSTERY -> 16 = Dragon
+  ok(/give Hidden Power Dragon 70, not Steel/.test(threw ?? ""), `...IVs that give another type are refused (${threw})`);
+}
+{
   ok(team.map((m) => m.species).join() === "Metagross,Latios,Swampert", "three mons, in order");
   ok(meta.item === "Choice Band" && latios.item === "Lum Berry" && swampert.item === "Leftovers", "items");
   ok(cfgs[1].ivs.atk === 0 && cfgs[1].ivs.spd === 27 && cfgs[0].ivs.atk === undefined, "IVs given / defaulted to 31");

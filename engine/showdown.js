@@ -15,7 +15,7 @@
 // long forms people type by hand (SpAtk, SpDef, ...).
 
 import { buildPlayerMon } from "./team.js";
-import { MOVES } from "./logic.js";
+import { MOVES, hiddenPowerFromIvs } from "./logic.js";
 
 // Move names: Showdown writes today's spellings ("Thunder Punch", "Extreme
 // Speed", "Self-Destruct", "Soft-Boiled"); the engine keeps Gen 3's
@@ -59,12 +59,27 @@ export function parseShowdownTeam(text) {
       else if ((m = line.match(/^EVs:\s*(.+)$/))) cfg.evs = statSpread(m[1], line);
       else if ((m = line.match(/^IVs:\s*(.+)$/))) cfg.ivs = statSpread(m[1], line);
       else if ((m = line.match(/^(\w+)\s+Nature$/))) cfg.nature = m[1];
+      else if ((m = line.match(/^-\s*Hidden Power\s*\[\s*(\w+)\s*\]$/i))) { cfg.moves.push("Hidden Power"); cfg.hpType = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase(); }
       else if ((m = line.match(/^-\s*(.+)$/))) cfg.moves.push(gen3MoveName(m[1].trim()));
       else throw new Error(`showdown: cannot read line "${line}" (${cfg.species})`);
     }
     if (!cfg.ability) throw new Error(`showdown: ${cfg.species} has no Ability line`);
     if (!cfg.nature) throw new Error(`showdown: ${cfg.species} has no Nature line`);
     if (cfg.moves.length < 1 || cfg.moves.length > 4) throw new Error(`showdown: ${cfg.species} has ${cfg.moves.length} moves`);
+    // "Hidden Power [Type]": in Gen 3 the type and power come from the IVs
+    // (Cmd_hiddenpowercalc). With an IVs line the type must be the one those
+    // IVs give (31 where unstated); without one the type is ENTERED, power 70
+    // (logic.js resolveHiddenPower's player convention), stats from 31 IVs.
+    if (cfg.hpType) {
+      if (Object.keys(cfg.ivs).length) {
+        const iv = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31, ...cfg.ivs };
+        const got = hiddenPowerFromIvs(iv);
+        if (got.type !== cfg.hpType) throw new Error(`showdown: ${cfg.species}'s IVs give Hidden Power ${got.type} ${got.power}, not ${cfg.hpType}`);
+      } else {
+        cfg.hiddenPower = { type: cfg.hpType, power: 70 };
+      }
+      delete cfg.hpType;
+    }
     return cfg;
   });
 }

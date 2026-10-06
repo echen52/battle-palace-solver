@@ -203,7 +203,7 @@ function buildMon(config) {
 // TYPE_MYSTERY (9), then the special types.
 const TYPE_BY_ID = [...PHYSICAL_TYPES, null, ...SPECIAL_TYPES];
 const HIDDEN_POWER_TYPES = TYPE_BY_ID.filter((t) => t && t !== "Normal");
-function hiddenPowerFromIvs(iv) {
+export function hiddenPowerFromIvs(iv) {
   const order = ["hp", "atk", "def", "spe", "spa", "spd"]; // source's bit order
   let powerBits = 0, typeBits = 0;
   order.forEach((k, i) => { powerBits |= ((iv[k] >> 1) & 1) << i; typeBits |= (iv[k] & 1) << i; });
