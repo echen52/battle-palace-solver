@@ -1,0 +1,31 @@
+Metagross @ Choice Band
+Ability: Clear Body
+Level: 50
+EVs: 36 HP / 252 Atk / 220 Spe
+Sassy Nature
+- Meteor Mash
+- Earthquake
+- Shadow Ball
+- Aerial Ace
+
+Latios @ Lum Berry
+Ability: Levitate
+Level: 50
+EVs: 40 HP / 68 Def / 176 SpA / 224 Spe
+Hasty Nature
+IVs: 30 HP / 0 Atk / 29 Def / 27 SpD / 30 Spe
+- Psychic
+- Ice Beam
+- Thunderbolt
+- Substitute
+
+Suicune @ Lum Berry
+Ability: Pressure
+Level: 50
+EVs: 252 HP / 204 Def / 52 Spe
+Modest Nature
+IVs: 0 Atk
+- Surf
+- Rest
+- Calm Mind
+- Toxic
