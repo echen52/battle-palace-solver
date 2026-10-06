@@ -292,7 +292,7 @@ Metagross leading (a small edge to Metagross). Averages over the 15 pairs
 89.9 / 90.1, Aerodactyl 89.7 / 90.2, Tauros 88.1 / 87.0, Ursaring 87.6 /
 86.3, Slaking 87.1 / 85.7. Paired vs Metagross, same pair, pooled: Salamence
 +0.43pp stay (p 0.18), +1.33pp type (p <0.0001); Heracross and Aerodactyl
-within 0.5pp (n.s.); Ursaring / Slaking / Tauros -2 to -6pp (p <0.0001).
+within 0.5pp (n.s.); Ursaring / Slaking / Tauros -2.0 to -4.6pp (p <0.0001).
 Best pair for every CB user: Latios + Suicune or Latios + Snorlax; worst
 Registeel + Regice. Top team: Metagross + Latios + Suicune 95.7 / 96.7.
 faintedLocked = the CB user fainted (always locked after its first move):
