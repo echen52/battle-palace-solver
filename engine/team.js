@@ -73,6 +73,10 @@ export function classifyKey(k) {
 const PLAIN = L.buildMon({ species: "Snorlax", level: 50, nature: "Hardy", moves: ["Splash"], ability: "Thick Fat", item: null, evs: {} });
 const DEFAULTS = { ...L.buildStartState({ you: PLAIN, opp: PLAIN }), youPalaceLowHp: false, oppPalaceLowHp: false };
 const YOU_VF_MASK = Object.entries(L.VF).filter(([k]) => k.startsWith("you")).reduce((m, [, b]) => m | b, 0);
+// What a Baton Pass carries (switchIn, batonPass): the volatile bits, and the
+// state fields besides the stages and the foe's Lock-On.
+const BP_VF_MASK = ["youFocusEnergy", "youCantEscape", "youPerishSonged", "youMudSport", "youWaterSport"].reduce((m, k) => m | L.VF[k], 0);
+const BP_KEEP = ["youConfused", "youSubstituteHP", "youCursed", "youSeeded", "youPerishCount", "youIngrained"];
 
 // ── start ──────────────────────────────────────────────────────────────────
 export function freshEntry(mon) {
@@ -107,6 +111,7 @@ export function engineCtx(tctx, s, { noLabels = true } = {}) {
     // The opponent's team, when modelled (engine/battle.js): its replacement
     // after Roar / Whirlwind comes in mid-turn too.
     ...(tctx.oppDrag ? { onDragOpp: (st) => tctx.oppDrag(st) } : {}),
+    ...(tctx.oppBaton ? { onBatonPassOpp: (st) => tctx.oppBaton(st) } : {}),
   };
 }
 
@@ -143,7 +148,13 @@ export function benchEntry(tctx, s) {
 // PLAYER, whoever owns the ability. "you" here; engine/battle.js runs this
 // function on the mirrored position for the opponent and passes "opp" (the
 // mirror's name for the player).
-export function switchIn(tctx, old, j, { firstTurn, quirkRecord = "you" }) {
+// `batonPass`: the leaver Baton Passed. SwitchInClearSetData's BP branch
+// (src/battle_main.c:3158-3217) keeps the stat stages; of status2 confusion,
+// Focus Energy, Substitute (and its HP), escape prevention and Curse; of
+// status3 Leech Seed, Lock-On, Perish Song (and its timer), Ingrain and
+// Mud / Water Sport; a foe's Lock-On aimed at the passer goes on, reset to 2
+// turns; and the trap the passer set on its foe is not lifted.
+export function switchIn(tctx, old, j, { firstTurn, quirkRecord = "you", batonPass = false }) {
   if (j === old.youActive) throw new Error("switchIn: that mon is already out");
   const entry = old.youBench[j];
   if (!entry) throw new Error(`switchIn: no bench entry ${j}`);
@@ -174,12 +185,19 @@ export function switchIn(tctx, old, j, { firstTurn, quirkRecord = "you" }) {
   s.youBench = bench;
   s.yourUsablePartyMons = bench.filter((e) => e && e.hpPct > 0).length;
   s.youMonFirstTurn = firstTurn;
-  // your volatile bits off; the opponent's untouched ...
-  s.volFlags = old.volFlags & ~YOU_VF_MASK;
+  // your volatile bits off (a pass keeps its own); the opponent's untouched ...
+  s.volFlags = old.volFlags & ~(batonPass ? YOU_VF_MASK & ~BP_VF_MASK : YOU_VF_MASK);
+  if (batonPass) {
+    for (const k of BP_KEEP) s[k] = old[k];
+    s.youStages = { ...old.youStages };
+    s.youAlwaysHitTurns = old.youAlwaysHitTurns != null ? 2 : null;
+  }
   // ... except what pointed at the mon that left (SwitchInClearSetData's loops):
   // escape prevention it caused, a Lock-On aimed at it, an infatuation with
   // it, a Wrap it held, and the opponent's Mirror Move memory of it.
-  s.oppAlwaysHitTurns = null;
+  // (the leaver's own Lock-On and the trap it set on its foe are lifted --
+  // :3160-3171 -- unless it passed them)
+  if (!batonPass) { s.oppAlwaysHitTurns = null; L.setVf(s, "oppCantEscape", false); }
   s.oppAttracted = false;
   s.oppWrapped = null;
   s.oppLastTakenMove = null;

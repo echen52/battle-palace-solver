@@ -16,8 +16,7 @@
 //         ids, next-in.js setId] , exactRoll?, rollSample?, rollOutcomeCap? }
 //
 // Not here yet (stated): the opponent's voluntary switches (ShouldSwitch,
-// src/battle_ai_switch_items.c:428-527) -- next; its Baton Pass (the engine
-// stops by name when the opponent's team is modelled).
+// src/battle_ai_switch_items.c:428-527) -- next.
 
 import * as L from "./logic.js";
 import * as T from "./team.js";
@@ -47,14 +46,15 @@ export function view(B, s) {
     ...(B.exactRoll ? { exactRoll: true } : {}), ...(B.rollOutcomeCap ? { rollOutcomeCap: B.rollOutcomeCap } : {}),
     ...(B.rollSample ? { rollSample: B.rollSample } : {}),
     oppDrag: (st) => oppDragIn(B, st),
+    oppBaton: (st) => oppBatonIn(B, st),
   };
 }
 
 // The opponent's mon in slot j comes in: team.js switchIn on the mirrored
 // position. firstTurn as in switchIn (2 mid-turn, true after a faint).
-export function oppSwitchIn(B, s, j, { firstTurn }) {
+export function oppSwitchIn(B, s, j, { firstTurn, batonPass = false }) {
   const m = mirrorState(s);
-  const sw = T.switchIn({ team: B.oppTeam, opp: B.team[s.youActive] }, m, j, { firstTurn, quirkRecord: "opp" });
+  const sw = T.switchIn({ team: B.oppTeam, opp: B.team[s.youActive] }, m, j, { firstTurn, quirkRecord: "opp", batonPass });
   return mirrorState(sw);
 }
 
@@ -65,6 +65,17 @@ function oppDragIn(B, s) {
   const c = aliveOpp(s);
   const left = { ...s, oppDraggedOut: false };
   return c.map((j) => ({ p: 1 / c.length, state: oppSwitchIn(B, left, j, { firstTurn: 2 }), opp: B.oppTeam[j] }));
+}
+
+// Its Baton Pass: the script's openpartyscreen asks OpponentHandleChoosePokemon,
+// i.e. the same GetMostSuitableMonToSwitchInto as after a faint, here against
+// the passer (alive, so excluded as the mon out). Its damage fallback runs with
+// gCurrentMove = Baton Pass instead of MOVE_NONE -- both power 0 and Normal,
+// so the same base damage 3. The newcomer comes in mid-turn.
+function oppBatonIn(B, s) {
+  const st = { ...s, oppDraggedOut: false };
+  const j = oppReplacementSlot(B, st);
+  return [{ p: 1, state: oppSwitchIn(B, st, j, { firstTurn: 2, batonPass: true }), opp: B.oppTeam[j] }];
 }
 
 // After its mon faints: OpponentHandleChoosePokemon -> GetMostSuitableMonTo

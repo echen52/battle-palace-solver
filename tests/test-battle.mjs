@@ -124,6 +124,42 @@ const spenser = () => ({ team: ME, oppTeam: SILVER.map((k) => opp(k, k.includes(
   ok(Bt.settle(B, yoursOnly).outcome === "lose", "your last down, theirs standing: a loss");
 }
 
+// ── their Baton Pass ───────────────────────────────────────────────────────
+{
+  // Vaporeon 3 (Acid Armor, Baton Pass) leads; Salamence 1 and Snorlax 1 behind.
+  const B = { team: ME, oppTeam: [opp("Vaporeon 3", "Water Absorb"), opp("Salamence 1", "Intimidate"), opp("Snorlax 1", "Thick Fat")], oppIds: ["Vaporeon 3", "Salamence 1", "Snorlax 1"].map(N.setId) };
+  const st0 = Bt.battleStart(B, 2); // your Metagross out
+  // What the pass carries, on the switch-in itself.
+  const carry = { ...st0, oppStages: { ...st0.oppStages, def: 2, spe: 1 }, oppSubstituteHP: 30, oppConfused: 3, oppSeeded: true, oppPerishCount: 2,
+    oppAttracted: true, youAlwaysHitTurns: 2, oppAlwaysHitTurns: 1 };
+  L.setVf(carry, "oppFocusEnergy", true); L.setVf(carry, "oppCantEscape", true); L.setVf(carry, "oppMinimized", true); L.setVf(carry, "youCantEscape", true);
+  const bp = Bt.oppSwitchIn(B, carry, 1, { firstTurn: 2, batonPass: true });
+  ok(bp.oppStages.def === 2 && bp.oppStages.spe === 1 && bp.oppSubstituteHP === 30 && bp.oppConfused === 3 && bp.oppSeeded && bp.oppPerishCount === 2
+    && L.vf(bp, "oppFocusEnergy") && L.vf(bp, "oppCantEscape"), "a pass carries stages, Substitute HP, confusion, Leech Seed, Perish, Focus Energy, the trap on it");
+  ok(!L.vf(bp, "oppMinimized") && bp.oppAttracted === false, "but not Minimize or infatuation");
+  ok(bp.youAlwaysHitTurns === 2 && bp.oppAlwaysHitTurns === 2 && L.vf(bp, "youCantEscape"), "its Lock-On goes on; your Lock-On on it resets to 2 turns; its trap on you stays");
+  const plain = Bt.oppSwitchIn(B, carry, 1, { firstTurn: 2 });
+  ok(plain.oppStages.def === 0 && plain.oppSubstituteHP == null && !plain.oppConfused && plain.youAlwaysHitTurns == null && !L.vf(plain, "youCantEscape"),
+    "a plain switch drops all of it, and lifts the trap the leaver set on you (SwitchInClearSetData :3162-3165)");
+  // Your side's switch lifts the trap your leaver set (the fix): Mean Look'd opponent free again.
+  const trapped = { ...st0 }; L.setVf(trapped, "oppCantEscape", true);
+  ok(!L.vf(T.switchIn(Bt.view(B, trapped), trapped, 0, { firstTurn: 2 }), "oppCantEscape"), "your leaver's Mean Look ends when it leaves");
+
+  // At the turn: Vaporeon passes first; your Earthquake lands on its pick.
+  const s = { ...st0, oppStages: { ...st0.oppStages, def: 2 } };
+  const ctx = T.engineCtx(Bt.view(B, s), s);
+  const first = L.resolveTurn(ctx, s, "Earthquake", "Baton Pass", { order: ["opp", "you"] });
+  const pick = Bt.oppReplacementSlot(B, s);
+  ok(near(first.reduce((a, r) => a + r.p, 0), 1) && first.every((r) => r.state.oppActive === pick && r.state.oppStages.def === 2),
+    `passing first: its pick (slot ${pick}) comes in with +2 Def`);
+  const hit = first.filter((r) => r.state.oppHpPct < 100).reduce((a, r) => a + r.p, 0);
+  ok(hit > 0.85 && first.every((r) => r.state.oppBench[0].hpPct === 100), `and your Earthquake hits the newcomer (${(100 * hit).toFixed(0)}% of outcomes), not the passer`);
+  // Moving second: you hit the passer, then it passes; the newcomer is untouched.
+  const second = L.resolveTurn(ctx, s, "Earthquake", "Baton Pass", { order: ["you", "opp"] });
+  const passed = second.filter((r) => r.state.oppActive === pick);
+  ok(passed.length > 0 && passed.every((r) => r.state.oppHpPct === 100 && r.state.oppBench[0].hpPct < 100), "passing second: the passer took the hit, the newcomer comes in fresh");
+}
+
 // ── whole battles, outcomes drawn ──────────────────────────────────────────
 {
   const B = { ...spenser(), rollSample: MC.rng(3) };

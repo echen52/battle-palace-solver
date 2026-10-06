@@ -6592,10 +6592,11 @@ const EFFECT_EXECUTORS = {
   EFFECT_BATON_PASS: (s, actor, ctx) => {
     if (!((ctx.reserves?.[actor] ?? 0) > 0)) return "failed";
     if (actor === "you") throw new Error("Baton Pass by your mon: the mid-turn party choice is not modelled yet (palace-solver Phase B)");
-    // With the opponent's team modelled (ctx.onDragOpp, engine/battle.js) a pass
-    // must carry its effects to the AI's pick -- not ported yet, so it stops.
-    if (ctx.onDragOpp) throw new Error("Baton Pass by the opponent: the passed effects and the AI's pick are not modelled yet (palace-solver Phase E)");
-    s.oppDraggedOut = true;
+    // With the opponent's team modelled (engine/battle.js) the pass is played:
+    // "batonPass" tells resolveTurnWithOrder to bring the AI's pick in with the
+    // passed effects (ctx.onBatonPassOpp) and, if the passer moved first, to
+    // let your move land on the newcomer.
+    s.oppDraggedOut = ctx.onBatonPassOpp ? "batonPass" : true;
   },
   // Batch 5 — persistent-state effects (Substitute/Reflect/Light Screen).
   EFFECT_SUBSTITUTE: (s, actor, ctx) => {
@@ -11055,13 +11056,30 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       continue;
     }
 
+    // PALACE FORK: the opponent Baton Passed as the FIRST action (its team
+    // modelled, engine/battle.js): its pick comes in carrying the passed
+    // effects, and your action -- chosen against the passer -- lands on it.
+    if (s.oppDraggedOut === "batonPass" && order[0] === "opp") {
+      snapHp(ctx, s);
+      for (const d of ctx.onBatonPassOpp(s)) {
+        const ctxN = effectiveCtx({ ...ctx, opp: d.opp, raw: undefined }, d.state);
+        secondAction(ctxN, d.state, d.state, fo.p * d.p, `${firstLabel} (Baton Pass)`);
+      }
+      continue;
+    }
     // PALACE FORK: a battler forced off the field this action takes no further
     // part in the turn -- see continueAfterDrag.
     if (s.youDraggedOut || s.oppDraggedOut) {
       continueAfterDrag(ctx, state, s, fo.p, firstLabel, results);
       continue;
     }
+    secondAction(ctx, state, s, fo.p, firstLabel);
+  }
+  return results;
 
+  // The second actor's action and the end of the turn. A function so the
+  // Baton Pass branch above can run it with the newcomer in.
+  function secondAction(ctx, state, s, pFirst, firstLabel) {
     let secondMove = order[1] === "you" ? yourMove : oppMove;
     let secondMoveData = order[1] === "you" ? yourMoveData : oppMoveData;
     // B2b batch 9: MAGIC COAT'S BOUNCE. If the FIRST actor set bounceMove this
@@ -11101,15 +11119,13 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
         : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
       if (s2.youDraggedOut || s2.oppDraggedOut) {
-        continueAfterDrag(ctx, s, s2, fo.p * so.p, `${firstLabel}; ${secondLabel}`, results);
+        continueAfterDrag(ctx, s, s2, pFirst * so.p, `${firstLabel}; ${secondLabel}`, results);
         continue;
       }
       const ctx3 = resolutionChanged(s, s2) ? reResolve(ctx2, s2) : ctx2; // B8d: and the end of turn sees both actions' changes
-      endOfTurnTail(ctx, ctx3, s2, fo.p * so.p, `${firstLabel}; ${secondLabel}`, results);
+      endOfTurnTail(ctx, ctx3, s2, pFirst * so.p, `${firstLabel}; ${secondLabel}`, results);
     }
   }
-
-  return results;
 }
 
 // PALACE FORK: after a forced switch-out. YOUR mon dragged out: the team
@@ -11126,6 +11142,13 @@ function continueAfterDrag(ctx, sBefore, s, pBase, label, results) {
     for (const d of ctx.onDrag(s)) {
       const ctxN = effectiveCtx({ ...ctx, you: d.you, raw: undefined }, d.state);
       endOfTurnTail(ctxN, ctxN, d.state, pBase * d.p, `${label} (dragged out)`, results);
+    }
+    return;
+  }
+  if (s.oppDraggedOut === "batonPass") {
+    for (const d of ctx.onBatonPassOpp(s)) {
+      const ctxN = effectiveCtx({ ...ctx, opp: d.opp, raw: undefined }, d.state);
+      endOfTurnTail(ctxN, ctxN, d.state, pBase * d.p, `${label} (Baton Pass)`, results);
     }
     return;
   }
