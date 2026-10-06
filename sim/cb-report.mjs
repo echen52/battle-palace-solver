@@ -2,7 +2,7 @@
 // Summarises sim/cb-grid.mjs: node sim/cb-report.mjs [results/screen/cb]
 // Per team: win rate under each policy (95% Wilson), the CB user's KOs,
 // turns locked into a resist and faints while locked. Then each CB user
-// averaged over the 15 support pairs, each pair averaged over the 6 CB
+// averaged over the 15 support pairs, each pair averaged over the CB
 // users, and every CB user vs Metagross with the SAME pair on the same
 // battles (paired: battles only one of them won, exact sign test).
 import fs from "node:fs";
@@ -19,7 +19,8 @@ const pct = (x) => (100 * x).toFixed(1);
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 function signP(a, b) { // two-sided exact sign test on a vs b discordant counts
   const n = a + b, k = Math.min(a, b);
-  let t = 0; for (let j = 0; j <= k; j++) { let c = 1; for (let i = 0; i < j; i++) c = (c * (n - i)) / (i + 1); t += c / 2 ** n; }
+  // in logs: 2 ** n overflows past n = 1023 (the pooled counts here are ~2000)
+  let t = 0, lc = 0; for (let j = 0; j <= k; j++) { if (j) lc += Math.log(n - j + 1) - Math.log(j); t += Math.exp(lc - n * Math.LN2); }
   return n ? Math.min(1, 2 * t) : 1;
 }
 
@@ -53,7 +54,7 @@ console.log("\nCB user, averaged over the 15 support pairs (its best pair):");
 for (const g of group((r) => r.cb)) console.log(`  ${g.k.padEnd(11)} stay ${pct(g.stay)}  type ${pct(g.type)}   best: ${g.best.x} + ${g.best.y} (${pct(g.best.both)})`);
 console.log("\nSupport mon, averaged over every team it is in:");
 for (const g of group((r) => [r.x, r.y])) console.log(`  ${g.k.padEnd(11)} stay ${pct(g.stay)}  type ${pct(g.type)}`);
-console.log("\nSupport pair, averaged over the 6 CB users:");
+console.log(`\nSupport pair, averaged over the ${new Set(rows.map((r) => r.cb)).size} CB users:`);
 for (const g of group((r) => `${r.x} + ${r.y}`)) console.log(`  ${g.k.padEnd(22)} stay ${pct(g.stay)}  type ${pct(g.type)}`);
 
 console.log("\nEach CB user vs Metagross with the same pair (type policy; battles only one won; sign test):");

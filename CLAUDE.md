@@ -281,6 +281,24 @@ Engine gap found: 10 of 336 Metronome-callable moves have no executor
 Charge, Assist, Camouflage, Weather Ball); only Clefable 1 reaches them in
 the late pool; the screen records such a battle as an error.
 
+STEP 2 DONE (CB grid, 2026-10-06): sim/cb-grid.mjs + sim/cb-report.mjs;
+results in results/screen/cb (gitignored; grid.json = all 7, grid-6cb.json =
+before Salamence). 7 CB leads (Metagross + the user's Salamence, Heracross,
+Ursaring, Aerodactyl, Slaking, Tauros in teams/cb/all-sets.txt) x 15 pairs of
+Swampert / Latios / Suicune / Snorlax / Registeel / Regice x {stay, type},
+1000 battles each, seed 1, 0 errors. Clashing items settled in stage 1 with
+Metagross leading (a small edge to Metagross). Averages over the 15 pairs
+(stay / type): Salamence 90.5 / 91.5, Metagross 90.1 / 90.2, Heracross
+89.9 / 90.1, Aerodactyl 89.7 / 90.2, Tauros 88.1 / 87.0, Ursaring 87.6 /
+86.3, Slaking 87.1 / 85.7. Paired vs Metagross, same pair, pooled: Salamence
++0.43pp stay (p 0.18), +1.33pp type (p <0.0001); Heracross and Aerodactyl
+within 0.5pp (n.s.); Ursaring / Slaking / Tauros -2 to -6pp (p <0.0001).
+Best pair for every CB user: Latios + Suicune or Latios + Snorlax; worst
+Registeel + Regice. Top team: Metagross + Latios + Suicune 95.7 / 96.7.
+faintedLocked = the CB user fainted (always locked after its first move):
+~0.2 per battle for the top four, ~0.6 for the three Normal types.
+cb-report's sign test overflowed past n = 1023 (NaN) -- now in logs.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
