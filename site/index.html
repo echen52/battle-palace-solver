@@ -82,7 +82,7 @@
     </div>
     <div class="field-row" id="leadRow" hidden>
       <label for="leadSet" title="Their first Pokémon: with it, the last one they can send is narrowed down.">Their 1st was</label>
-      <input type="text" id="leadSet" class="trigger set-input" list="setList" placeholder="Type to search sets…" autocomplete="off" />
+      <div class="combo-wrap"><input type="text" id="leadSet" class="trigger combo-input" placeholder="Type to search sets…" autocomplete="off" /><div class="combo-list" id="leadSetList"></div></div>
     </div>
 
     <h3>Field</h3>
@@ -158,12 +158,11 @@
     <h2>Opponent</h2>
     <div class="field-row">
       <label for="oppSet">Set</label>
-      <input type="text" id="oppSet" class="trigger set-input" list="setList" placeholder="Type to search sets…" autocomplete="off" />
+      <div class="combo-wrap"><input type="text" id="oppSet" class="trigger combo-input" placeholder="Type to search sets…" autocomplete="off" /><div class="combo-list" id="oppSetList"></div></div>
     </div>
     <div class="field-row">
       <input type="checkbox" id="bracketOnly" class="trigger" checked /><label for="bracketOnly" class="chk-label">Only sets this challenge can have</label>
     </div>
-    <datalist id="setList"></datalist>
     <div id="oppCard" class="set-card" hidden></div>
     <div class="field-row" id="oppAbilityRow" hidden>
       <label for="oppAbility">Ability</label>

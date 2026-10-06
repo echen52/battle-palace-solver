@@ -61,6 +61,28 @@ try {
   ok((await page.locator("#oppIv option").first().textContent()).startsWith("12"), "IVs default to the bracket's tier (12 for challenge 3, battle 7)");
   ok(await page.locator("#oppAbilityRow").isHidden(), "one-ability set: no ability picker");
 
+  // The set dropdown: focus lists the bracket's sets, typing narrows (names
+  // starting with the text first), Enter takes the top match, arrows move,
+  // junk text is put back to the last set on leaving.
+  await page.click("h1"); await page.waitForTimeout(300); // leave the box fill() typed into
+  await page.click("#oppSet");
+  const listed = await page.locator("#oppSetList .combo-item").count();
+  ok(listed === U.setChoices({ challenge: 3, battle: 7 }).length, `focus lists the bracket's ${listed} sets`);
+  // search text: the first 4 letters of a species with 2+ sets in this bracket
+  const labels = U.setChoices({ challenge: 3, battle: 7 }).map(U.setLabel);
+  const q = labels.map((l) => l.slice(0, 4)).find((p4, _, all) => all.filter((x) => x === p4).length >= 2);
+  await page.keyboard.type(q.toLowerCase());
+  const narrowed = await page.$$eval("#oppSetList .combo-item", (e) => e.map((x) => x.textContent));
+  ok(narrowed.length > 0 && narrowed.length >= 2 && narrowed.every((t) => t.toLowerCase().includes(q.toLowerCase())) && narrowed[0].startsWith(q), `typing "${q.toLowerCase()}" narrows: ${narrowed.join(", ")}`);
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
+  ok(await page.inputValue("#oppSet") === narrowed[1] && (await page.textContent("#oppCard")).includes(narrowed[1]) && await page.locator("#oppSetList.open").count() === 0, `arrows + Enter pick ${narrowed[1]}, card follows, list closes`);
+  await page.click("#oppSet"); await page.keyboard.type("zzz");
+  ok((await page.textContent("#oppSetList")).includes("No matches"), "no match says so");
+  await page.click("h1"); await page.waitForTimeout(300);
+  ok(await page.inputValue("#oppSet") === narrowed[1], "leaving with junk puts the last set back");
+  await page.click("#oppSet"); await page.keyboard.type("salamence 1"); await page.keyboard.press("Enter"); await page.waitForTimeout(400); // the bars redraw 120 ms after a change
+  ok(await page.inputValue("#oppSet") === "Salamence 1" && (await page.textContent("#oppCard")).includes("Salamence 1"), "Enter alone takes the top match");
+
   // This turn's bars = turnChoices on the same position.
   const zero = Object.fromEntries(U.STAGE_KEYS.map((k) => [k, 0]));
   const cfgs = U.parseTeam(TEAM);

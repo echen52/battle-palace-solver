@@ -25,41 +25,52 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; } /* rows are display:flex; hidden must still hide */
-body { font-family: monospace; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
+body { font-family: monospace; font-size: 15px; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-.app-header { padding: 14px 20px 0; } /* plain: same background as the page, no band or rule */
-.app-header h1 { font-size: 1.25rem; }
+.app-header { padding: 18px 20px 0; } /* plain: same background as the page, no band or rule */
+.app-header h1 { font-size: 22px; }
 
-.layout { display: grid; grid-template-columns: 330px minmax(380px, 1fr) 320px; gap: 16px; max-width: 1280px; margin: 0 auto; padding: 16px 20px 48px; align-items: start; }
-@media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
+/* full width, as on the Arena page: the side panels share the room, the
+   middle (results table) gets a little more */
+.layout { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(440px, 1.25fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px 48px; align-items: start; }
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
 
-.panel { background: var(--panel); border: 2px solid var(--border); padding: 12px; }
-.panel h2 { font-size: 1rem; margin-bottom: 10px; color: var(--accent); border-bottom: 1px solid var(--divider); padding-bottom: 6px; }
-.panel h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 6px; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+.panel h2 { font-size: 17px; margin-bottom: 12px; color: var(--accent); border-bottom: 1px solid var(--divider); padding-bottom: 6px; }
+.panel h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 16px 0 8px; }
 .panel h3 span { color: var(--text); text-transform: none; letter-spacing: 0; }
 
-.field-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.field-row > label { color: var(--muted); font-size: 12px; min-width: 84px; }
+.field-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; flex-wrap: wrap; }
+.field-row > label { color: var(--muted); font-size: 13px; min-width: 92px; }
 .field-row > label.inline-label { min-width: 0; }
 .field-row > label.chk-label { min-width: 0; color: var(--text); }
 
 select, input[type="text"], input[type="number"], textarea {
-  background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 13px; padding: 5px 7px; outline: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 3px; color: var(--text); font-family: monospace; font-size: 14px; padding: 5px 7px; outline: none;
 }
 select:focus, input:focus, textarea:focus { border-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: #8a7d73; }
-input[type="number"] { width: 64px; }
+input[type="number"] { width: 68px; }
 input[type="checkbox"] { accent-color: var(--accent); }
-.set-input { flex: 1; min-width: 160px; }
-textarea { width: 100%; resize: vertical; min-height: 120px; }
+textarea { width: 100%; resize: vertical; min-height: 130px; }
 
-.btn { padding: 6px 12px; font-family: monospace; font-size: 13px; cursor: pointer; border: 2px solid var(--border); background: var(--surface); color: var(--text); }
+/* filtering dropdown for the set pickers (as on the Arena page) */
+.combo-wrap { position: relative; flex: 1; min-width: 160px; }
+.combo-input { width: 100%; }
+.combo-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 200; background: var(--panel); border: 1px solid var(--accent); border-top: none; max-height: 280px; overflow-y: auto; display: none; }
+.combo-list.open { display: block; }
+.combo-item { padding: 5px 8px; cursor: pointer; font-size: 13px; color: var(--text); border-bottom: 1px solid var(--divider); }
+.combo-item.cur { color: var(--accent); }
+.combo-item:hover, .combo-item.hi { background: var(--surface); color: var(--accent); }
+.combo-empty { padding: 5px 8px; font-size: 13px; color: var(--muted); font-style: italic; }
+
+.btn { padding: 6px 12px; font-family: monospace; font-size: 14px; cursor: pointer; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--text); }
 .btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: #9a4418; border-color: var(--accent); color: #fff; }
 .btn-small { padding: 3px 8px; }
-.btn-row { display: flex; gap: 8px; margin: 6px 0 10px; flex-wrap: wrap; align-items: center; }
+.btn-row { display: flex; gap: 8px; margin: 8px 0 10px; flex-wrap: wrap; align-items: center; }
 .btn-row input[type="text"] { flex: 1; min-width: 100px; }
 
 /* segmented radio buttons */
@@ -68,47 +79,47 @@ textarea { width: 100%; resize: vertical; min-height: 120px; }
 .seg input[type="radio"]:checked + label.btn { border-color: var(--brand); color: #fff; background: var(--brand); }
 
 /* your mons */
-.mon-card { border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; margin-top: 10px; }
+.mon-card { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); padding: 9px 11px; margin-top: 10px; }
 .mon-card.out { border-color: var(--accent); }
-.mon-card .mc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mon-card .mc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .mon-card .mc-name { font-weight: bold; }
-.mon-card .mc-meta { color: var(--muted); font-size: 11px; }
-.mon-card .field-row > label { min-width: 64px; }
+.mon-card .mc-meta { color: var(--muted); font-size: 12px; }
+.mon-card .field-row > label { min-width: 68px; }
 .out-radio { accent-color: var(--accent); }
-.active-block { border-top: 1px solid var(--border); margin-top: 12px; }
+.active-block { border-top: 1px solid var(--border); margin-top: 14px; }
 
 /* two columns, as on the Arena page: Atk Def / SpA SpD / Spe Acc / Eva */
-.stage-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
-.stage-grid select { padding: 2px 3px; font-size: 12px; min-width: 0; }
+.stage-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 8px; align-items: center; font-size: 13px; color: var(--muted); flex: 1; min-width: 0; }
+.stage-grid select { padding: 2px 3px; font-size: 13px; min-width: 0; }
 #youConfused, #oppConfused { flex: 1; min-width: 0; } /* long option text: shrink, stay beside the label */
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.col-title { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.col-title { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
 .two-col .field-row > label { min-width: 0; }
 
-.set-card { border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; margin: 4px 0 10px; font-size: 12px; }
+.set-card { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); padding: 9px 11px; margin: 4px 0 10px; font-size: 13px; }
 .set-card .sc-title { font-weight: bold; color: var(--accent); margin-bottom: 4px; }
 .set-card .sc-meta { color: var(--muted); margin-bottom: 4px; line-height: 1.5; }
 .set-card .sc-meta b { color: var(--text); font-weight: normal; }
-.hp-abs { color: var(--muted); font-size: 12px; }
+.hp-abs { color: var(--muted); font-size: 13px; }
 
 /* results */
 .results-block { margin-top: 6px; }
-.best-move { font-size: 15px; color: var(--best); border: 1px solid var(--border); background: var(--bg); padding: 8px 10px; min-height: 36px; }
+.best-move { font-size: 18px; font-weight: bold; color: var(--best); border: 1px solid var(--border); border-radius: 4px; background: var(--bg); padding: 10px 12px; min-height: 42px; }
 .best-move.tie { color: var(--tie); }
-.progress { color: var(--muted); font-size: 11px; margin: 6px 0; min-height: 14px; }
-.options-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.options-table th { color: var(--muted); font-weight: normal; text-align: right; padding: 4px; border-bottom: 1px solid var(--border); }
+.progress { color: var(--muted); font-size: 12px; margin: 6px 0; min-height: 15px; }
+.options-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.options-table th { color: var(--muted); font-weight: normal; font-size: 13px; text-align: right; padding: 5px; border-bottom: 1px solid var(--border); }
 .options-table th:first-child, .options-table td:first-child { text-align: left; }
-.options-table td { padding: 5px 4px; text-align: right; border-bottom: 1px solid var(--divider); white-space: nowrap; }
+.options-table td { padding: 6px 5px; text-align: right; border-bottom: 1px solid var(--divider); white-space: nowrap; }
 .options-table tr.best td:first-child { color: var(--best); }
 .options-table tr.tie td:first-child { color: var(--tie); }
-.options-table .pm { color: var(--muted); font-size: 11px; }
-.notes { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.5; }
-.error-display { color: var(--error); font-size: 12px; margin-top: 6px; white-space: pre-wrap; }
+.options-table .pm { color: var(--muted); font-size: 12px; }
+.notes { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.5; }
+.error-display { color: var(--error); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
 
-.choice-bars .cb-row { display: grid; grid-template-columns: 1fr 44px; gap: 6px; font-size: 11px; margin-bottom: 3px; align-items: center; }
-.choice-bars .cb-name { position: relative; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.choice-bars .cb-row { display: grid; grid-template-columns: 1fr 48px; gap: 6px; font-size: 13px; margin-bottom: 3px; align-items: center; }
+.choice-bars .cb-name { position: relative; padding: 2px 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .choice-bars .cb-fill { position: absolute; inset: 0 auto 0 0; background: rgba(224, 138, 79, 0.22); z-index: 0; }
 .choice-bars .cb-name span { position: relative; z-index: 1; }
 .choice-bars .cb-p { text-align: right; color: var(--muted); }

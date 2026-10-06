@@ -110,11 +110,53 @@ function refreshSetList() {
   const { challenge, battle } = runInputs();
   const keys = setChoices({ challenge, battle, bracketOnly: $("bracketOnly").checked });
   labelToKey.clear();
-  $("setList").innerHTML = keys.map((k) => { labelToKey.set(setLabel(k), k); return `<option value="${setLabel(k)}"></option>`; }).join("");
+  setLabels = keys.map((k) => { labelToKey.set(setLabel(k), k); return setLabel(k); });
   // keep every set resolvable by name even when filtered out of the list
   for (const k of Object.keys(FRONTIER_POOL)) if (!labelToKey.has(setLabel(k))) labelToKey.set(setLabel(k), k);
 }
 const keyOf = (label) => labelToKey.get(label.trim()) ?? null;
+let setLabels = [];
+
+// Filtering dropdown for the set pickers (as on the Arena page): focus shows
+// the whole list, typing narrows it (names starting with the text first),
+// arrows + Enter or a click pick (Enter alone takes the top match), Escape
+// closes. Picking fires a real
+// "change" on the input, so the usual listeners run; leaving with text that
+// is not a set puts back the last set picked.
+function setupCombo(inputId, listId) {
+  const input = $(inputId), list = $(listId);
+  let hi = -1, last = input.value;
+  const close = () => { list.classList.remove("open"); list.innerHTML = ""; hi = -1; };
+  const choose = (v) => { input.value = v; last = v; close(); input.dispatchEvent(new Event("change", { bubbles: true })); };
+  const mark = (items) => { items.forEach((el, i) => el.classList.toggle("hi", i === hi)); if (hi >= 0) items[hi].scrollIntoView({ block: "nearest" }); };
+  function render(all) {
+    const q = all ? "" : input.value.trim().toLowerCase();
+    const starts = setLabels.filter((o) => o.toLowerCase().startsWith(q));
+    const rest = q ? setLabels.filter((o) => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q)) : [];
+    const matches = starts.concat(rest);
+    hi = -1;
+    list.innerHTML = matches.length ? matches.map((o) => `<div class="combo-item${o === last ? " cur" : ""}" data-value="${o}">${o}</div>`).join("")
+      : '<div class="combo-empty">No matches</div>';
+    list.classList.add("open");
+    list.querySelectorAll(".combo-item").forEach((el) => el.addEventListener("mousedown", (e) => { e.preventDefault(); choose(el.dataset.value); }));
+    list.querySelector(".cur")?.scrollIntoView({ block: "nearest" });
+  }
+  input.addEventListener("focus", () => { input.select(); render(true); });
+  input.addEventListener("click", () => { if (!list.classList.contains("open")) { input.select(); render(true); } }); // already focused
+  input.addEventListener("input", () => render(false));
+  input.addEventListener("keydown", (e) => {
+    const items = list.querySelectorAll(".combo-item");
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!list.classList.contains("open")) render(true); else { hi = Math.min(hi + 1, items.length - 1); mark(items); } }
+    else if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(hi - 1, -1); mark(items); }
+    else if (e.key === "Enter") { const v = (items[hi] ?? items[0])?.dataset.value; if (v) { e.preventDefault(); choose(v); } }
+    else if (e.key === "Escape") close();
+  });
+  input.addEventListener("blur", () => setTimeout(() => {
+    close();
+    if (input.value !== last && !keyOf(input.value)) { input.value = last; input.dispatchEvent(new Event("change", { bubbles: true })); }
+    else last = input.value;
+  }, 150));
+}
 function renderOppSet() {
   const key = keyOf($("oppSet").value);
   const e = key ? FRONTIER_POOL[key] : null;
@@ -233,6 +275,7 @@ function init() {
   $("oppStatusRows").innerHTML = statusRows("o");
   sideRows($("youSide"), "you"); sideRows($("oppSide"), "opp");
   refreshSaved(); refreshSetList();
+  setupCombo("oppSet", "oppSetList"); setupCombo("leadSet", "leadSetList");
 
   $("parseTeam").addEventListener("click", () => useTeam($("teamText").value));
   $("saveTeam").addEventListener("click", () => {
