@@ -38,6 +38,18 @@ for (const r of runs) {
   if (losses.length) console.log(`   lost to: ${losses.map((l) => `${l.n} ${l.trainer} (${l.keys.join("/")})`).join("; ")}`);
   const errs = ls.filter((l) => l.result === "error");
   if (errs.length) console.log(`   errors: ${[...new Set(errs.map((l) => l.error))].join(" | ")}`);
+  // the screen's per-slot counters (sim/screen-core.mjs), per battle played
+  if (played.length && played[0].c) {
+    played[0].mons.forEach((sp, j) => {
+      const cs = played.map((l) => l.c[j]), per = (f) => fmt(mean(cs.map(f)), 2);
+      const firstKO = cs.map((x) => x.boostAtFirstKO).filter((x) => x !== null);
+      const st = {};
+      for (const x of cs) for (const e of x.status) st[e.status] = (st[e.status] ?? 0) + 1;
+      const stTxt = Object.entries(st).map(([k, v]) => `${k} ${fmt(v / played.length, 2)}`).join(", ") || "none";
+      console.log(`   ${sp}: KOs ${per((x) => x.kos)} | max boost ${per((x) => x.maxBoost)}, at 1st KO ${fmt(mean(firstKO), 2)} | statuses dealt ${stTxt}`
+        + ` | Destiny Bond ${per((x) => x.dbUsed)} used, ${per((x) => x.dbKOs)} KOs | Choice-locked into a resist ${per((x) => x.lockedBadTurns)} turns, fainted locked ${per((x) => x.faintedLocked)}`);
+    });
+  }
 }
 
 if (runs.length === 2) {
