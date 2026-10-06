@@ -168,7 +168,10 @@ engine/worker-handler.js). Saved teams: localStorage "palaceSolver.savedTeams"
 (all echen52 Pages sites share one origin -- the prefix keeps it apart).
 Not on the page yet: score weights (defaults used), PP, Leech Seed / Curse /
 Perish / other volatiles, Open Level, Frontier Brain battles.
-NOT PUBLISHED: no remote; publishing needs the user's OK and a repo.
+PUBLISHED 2026-10-05: origin = github.com/echen52/battle-palace-solver (public),
+Pages from main / root -> https://echen52.github.io/battle-palace-solver/ (root
+index.html forwards to site/). Every push needs the user's OK. Theme: forest
+green (styles.css header comment lists the roles and computed contrast).
 
 ## Side finding
 
