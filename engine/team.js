@@ -75,7 +75,7 @@ const DEFAULTS = { ...L.buildStartState({ you: PLAIN, opp: PLAIN }), youPalaceLo
 const YOU_VF_MASK = Object.entries(L.VF).filter(([k]) => k.startsWith("you")).reduce((m, [, b]) => m | b, 0);
 
 // ── start ──────────────────────────────────────────────────────────────────
-function freshEntry(mon) {
+export function freshEntry(mon) {
   return { hpPct: 100, status: null, sleepTurns: null, toxic: false, partyPP: mon.maxPP.slice(), itemOverride: undefined, berryConsumed: false };
 }
 // The battle as it stands when the first turn begins: your lead and the
@@ -104,6 +104,9 @@ export function engineCtx(tctx, s, { noLabels = true } = {}) {
     ...(tctx.rollSample ? { rollSample: tctx.rollSample } : {}),
     reserves: { you: aliveBench(s).length, opp: tctx.oppReserves ?? 2 },
     onDrag: (st) => dragIn(tctx, st),
+    // The opponent's team, when modelled (engine/battle.js): its replacement
+    // after Roar / Whirlwind comes in mid-turn too.
+    ...(tctx.oppDrag ? { onDragOpp: (st) => tctx.oppDrag(st) } : {}),
   };
 }
 
@@ -132,7 +135,15 @@ export function benchEntry(tctx, s) {
 // (that turn's end decrements gDisableStructs.isFirstTurn, so the mon's NEXT
 // turn is its first), true when it comes in at a turn's end after a faint
 // (TurnValuesCleanUp has already run for that turn).
-export function switchIn(tctx, old, j, { firstTurn }) {
+// `quirkRecord`: the side that Intimidate's and Trace's ability records land
+// on. Both fire from AbilityBattleEffects(ABILITYEFFECT_INTIMIDATE1 / _TRACE,
+// battler 0, ...) (HandleFaintedMonActions case 6, src/battle_util.c:1959-1960,
+// which runs after every action; and battle start, src/battle_main.c:3880),
+// and its RecordAbilityBattle(battler, ...) (:3194-3195) uses that 0: the
+// PLAYER, whoever owns the ability. "you" here; engine/battle.js runs this
+// function on the mirrored position for the opponent and passes "opp" (the
+// mirror's name for the player).
+export function switchIn(tctx, old, j, { firstTurn, quirkRecord = "you" }) {
   if (j === old.youActive) throw new Error("switchIn: that mon is already out");
   const entry = old.youBench[j];
   if (!entry) throw new Error(`switchIn: no bench entry ${j}`);
@@ -204,11 +215,11 @@ export function switchIn(tctx, old, j, { firstTurn }) {
     // both record onto the PLAYER (the battle-start quirk, Phase D F2a).
     const foe = L.effectiveCtx({ you: mon, opp: tctx.opp }, s).opp;
     if (mon.ability === "Intimidate") {
-      L.recordAbility(s, "you", "Intimidate");
+      L.recordAbility(s, quirkRecord, "Intimidate");
       if (!L.intimidateBlocked(foe, s, "opp")) L.bumpStage(s.oppStages, "atk", -1);
       else if (s.oppSubstituteHP == null) L.recordAbility(s, "opp", foe.ability);
     }
-    if (mon.ability === "Trace" && foe.ability) { s.youAbilityOverride = foe.ability; L.recordAbility(s, "you", foe.ability); }
+    if (mon.ability === "Trace" && foe.ability) { s.youAbilityOverride = foe.ability; L.recordAbility(s, quirkRecord, foe.ability); }
   }
   return s;
 }
@@ -251,7 +262,9 @@ function oppLeavesOnPerish(tctx, s, ctx) {
 //            "lose"     your whole team has fainted
 export function teamTurn(tctx, s, action) {
   const ctx = engineCtx(tctx, s);
-  if (oppLeavesOnPerish(tctx, s, ctx)) return [{ p: 1, state: s, outcome: "oppLeft", label: "the opponent switches out (Perish Song at 0)" }];
+  // tctx.oppSwitchHandled: engine/battle.js runs the opponent's ShouldSwitch
+  // itself (its team is known there), so the one-mon shortcut is skipped.
+  if (!tctx.oppSwitchHandled && oppLeavesOnPerish(tctx, s, ctx)) return [{ p: 1, state: s, outcome: "oppLeft", label: "the opponent switches out (Perish Song at 0)" }];
   let res;
   if (action === "stay") {
     res = palaceTurn(ctx, s, { ctxOf: (st) => engineCtx(tctx, st) });

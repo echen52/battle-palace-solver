@@ -6592,6 +6592,9 @@ const EFFECT_EXECUTORS = {
   EFFECT_BATON_PASS: (s, actor, ctx) => {
     if (!((ctx.reserves?.[actor] ?? 0) > 0)) return "failed";
     if (actor === "you") throw new Error("Baton Pass by your mon: the mid-turn party choice is not modelled yet (palace-solver Phase B)");
+    // With the opponent's team modelled (ctx.onDragOpp, engine/battle.js) a pass
+    // must carry its effects to the AI's pick -- not ported yet, so it stops.
+    if (ctx.onDragOpp) throw new Error("Baton Pass by the opponent: the passed effects and the AI's pick are not modelled yet (palace-solver Phase E)");
     s.oppDraggedOut = true;
   },
   // Batch 5 — persistent-state effects (Substitute/Reflect/Light Screen).
@@ -11112,9 +11115,10 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
 // PALACE FORK: after a forced switch-out. YOUR mon dragged out: the team
 // layer's ctx.onDrag(state) brings the replacement in now -- returning
 // [{ p, state, you }] -- and the turn ends with the newcomer out (its
-// residuals, its Leftovers). The OPPONENT dragged out (or passing): the solve
-// ends there; the end of turn still runs for your mon, and the flag stays set
-// for the team layer to read.
+// residuals, its Leftovers). The OPPONENT dragged out: with its team modelled
+// (ctx.onDragOpp, engine/battle.js, returning [{ p, state, opp }]) the same;
+// without it (the one-mon solve) the solve ends there; the end of turn still
+// runs for your mon, and the flag stays set for the team layer to read.
 function continueAfterDrag(ctx, sBefore, s, pBase, label, results) {
   snapHp(ctx, s);
   if (s.youDraggedOut) {
@@ -11122,6 +11126,13 @@ function continueAfterDrag(ctx, sBefore, s, pBase, label, results) {
     for (const d of ctx.onDrag(s)) {
       const ctxN = effectiveCtx({ ...ctx, you: d.you, raw: undefined }, d.state);
       endOfTurnTail(ctxN, ctxN, d.state, pBase * d.p, `${label} (dragged out)`, results);
+    }
+    return;
+  }
+  if (ctx.onDragOpp) {
+    for (const d of ctx.onDragOpp(s)) {
+      const ctxN = effectiveCtx({ ...ctx, opp: d.opp, raw: undefined }, d.state);
+      endOfTurnTail(ctxN, ctxN, d.state, pBase * d.p, `${label} (opponent dragged out)`, results);
     }
     return;
   }

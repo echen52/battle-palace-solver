@@ -65,6 +65,9 @@ export const BRAIN_TEAMS = {
   "Spenser Gold": ["Spenser Gold Arcanine", "Spenser Gold Slaking", "Spenser Gold Suicune"],
 };
 const BRAIN_ID_BASE = 10000;
+// A set's id for mostSuitable / buildReplacement: its frontier index, or the
+// id given to a Brain set below.
+export const setId = (key) => BRAIN_ID.get(key) ?? FRONTIER_POOL[key].index;
 const BRAIN_ID = new Map();
 for (const team of Object.values(BRAIN_TEAMS)) for (const key of team) {
   const e = FRONTIER_POOL[key];
