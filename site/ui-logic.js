@@ -10,7 +10,7 @@ import { buildPlayerMon } from "../engine/team.js";
 import { getOpponentConfig } from "../engine/opponent-adapter.js";
 import { FRONTIER_POOL } from "../engine/frontier-pool.js";
 import { FRONTIER_TRAINERS } from "../engine/frontier-trainers.js";
-import { trainerPrior, fixedIvs, makeNextIn } from "../engine/next-in.js";
+import { trainerPrior, fixedIvs, makeNextIn, BRAIN_TEAMS } from "../engine/next-in.js";
 import { lowHpCheck, palaceChoices, quickClawDraws, GROUP_NAMES } from "../engine/palace.js";
 import { rootActions } from "../engine/solve.js";
 
@@ -25,10 +25,25 @@ export function parseTeam(text) {
   return cfgs;
 }
 
+// ── the Frontier Brain ─────────────────────────────────────────────────────
+// Spenser comes at win streak 21 (Silver) and 42 (Gold): the 7th battle of
+// challenges 3 and 6 (sFrontierBrainStreakAppearances, see next-in.js). A
+// default only: holding Silver but not Gold, streak 21 is a normal trainer
+// (GetFrontierBrainStatus with one symbol checks 42 only). With both symbols
+// he also comes at 63, 84, ... -- inside "8+", so there the page leaves it to
+// you.
+export const BRAINS = Object.keys(BRAIN_TEAMS);
+export function brainFor({ challenge, battle } = {}) {
+  if (battle !== 7) return null;
+  return challenge === 3 ? "Spenser Silver" : challenge === 6 ? "Spenser Gold" : null;
+}
+
 // ── the opponent's set list ────────────────────────────────────────────────
 // Level-50 sets (the solver is a level-50 solver), optionally only those a
-// trainer drawn for this challenge and battle can lead with.
-export function setChoices({ challenge, battle, bracketOnly = true } = {}) {
+// trainer drawn for this challenge and battle can lead with. brain: his three,
+// in party order.
+export function setChoices({ challenge, battle, bracketOnly = true, brain = null } = {}) {
+  if (brain) return [...BRAIN_TEAMS[brain]];
   let ids = null;
   if (bracketOnly && challenge && battle) {
     ids = new Set();
@@ -50,6 +65,7 @@ export const setLabel = (key) => key.replace(/^MR_MIME /, "Mr. Mime ");
 // set (next-in.js teammateDist's own weighting).
 export function ivTierOdds(setKey, { challenge, battle } = {}) {
   const e = FRONTIER_POOL[setKey];
+  if (e?.brain) return [{ iv: e.fixedIV, p: 1 }]; // a Brain's IVs are fixed
   if (!e || !challenge || !battle) return [];
   const by = new Map();
   for (const { id, p } of trainerPrior({ challenge, battle })) {
@@ -90,7 +106,7 @@ export function sleepCounters({ rest = false, slept = 0 } = {}, mon) {
 //   you: { stages, confused (0 = no, else the engine's next-check index 1..5), subPct, lowHp (true/false/null = auto) },
 //   opp: { setKey, ability, ivTier, hpPct, status, toxicTurns, sleep, itemGone, stages, confused, firstTurn, lowHp },
 //   field: { weather, weatherTurns (null = permanent), you: { reflect, lightScreen, spikes }, opp: { ... } },
-//   run: { challenge, battle, oppIndex (1-3), leadKey (when oppIndex is 2) },
+//   run: { challenge, battle, oppIndex (1-3), leadKey (when oppIndex is 2), brain (null or a BRAINS name) },
 // }
 // Returns { tctx (plain data + nextIn spec), start: [{ p, state }], actions, labels, notes }.
 const SCREEN_TURNS = 5;
@@ -98,6 +114,13 @@ const MAX_SLEEP_VARIANTS = 64;
 export function buildFight(form) {
   const notes = [];
   const team = form.team.map((cfg) => buildPlayerMon(cfg));
+  const brain = form.run?.brain ?? null;
+  if (brain) {
+    const bt = BRAIN_TEAMS[brain], who = brain.split(" ")[0], i = bt.indexOf(form.opp.setKey), idx = form.run.oppIndex ?? 1;
+    if (i < 0) throw new Error(`${form.opp.setKey} is not on ${brain}'s team (${bt.join(", ")})`);
+    if (idx === 1 && i !== 0) throw new Error(`${who} always sends out ${FRONTIER_POOL[bt[0]].species} first`);
+    if (idx > 1 && i === 0) throw new Error(`${FRONTIER_POOL[bt[0]].species} is ${who}'s first Pokémon, not his ${idx === 2 ? "2nd" : "3rd"}`);
+  } else if (FRONTIER_POOL[form.opp.setKey]?.brain) throw new Error(`${form.opp.setKey} is a Frontier Brain set: pick the Brain battle`);
   const opp = buildOpponent(form.opp);
   const oppReserves = Math.max(0, 3 - (form.run?.oppIndex ?? 1));
   const tbase = { team, opp, oppReserves };
@@ -169,7 +192,11 @@ export function buildFight(form) {
   let nextInSpec = null;
   const run = form.run ?? {};
   if (run.oppIndex === 3) notes.push("Their last Pokémon: a KO ends the battle (no replacement to face).");
-  else if (run.challenge && run.battle) {
+  else if (brain) {
+    const spec = { lead: BRAIN_TEAMS[brain][0], second: run.oppIndex === 2 ? form.opp.setKey : null, brain };
+    makeNextIn(spec);
+    nextInSpec = spec;
+  } else if (run.challenge && run.battle) {
     const spec = run.oppIndex === 2
       ? { lead: run.leadKey, second: form.opp.setKey, challenge: run.challenge, battle: run.battle }
       : { lead: form.opp.setKey, challenge: run.challenge, battle: run.battle };

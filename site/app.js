@@ -2,7 +2,7 @@
 // The page's DOM wiring. All battle logic is in ui-logic.js (pure) and the
 // engine; the solve runs in Web Workers (solver.js).
 
-import { parseTeam, setChoices, setLabel, ivTierOdds, buildOpponent, buildFight, turnChoices, resultRows, verdict, pct, STAGE_KEYS } from "./ui-logic.js";
+import { parseTeam, setChoices, setLabel, ivTierOdds, buildOpponent, buildFight, turnChoices, resultRows, verdict, pct, STAGE_KEYS, brainFor } from "./ui-logic.js";
 import { solveInBrowser } from "./solver.js";
 import { FRONTIER_POOL } from "../engine/frontier-pool.js";
 import { palaceMoveGroup, GROUP_NAMES } from "../engine/palace.js";
@@ -104,11 +104,12 @@ function readMons() {
 // ── the opponent ───────────────────────────────────────────────────────────
 function runInputs() {
   return { challenge: Number($("challenge").value), battle: Number($("battle").value),
-    oppIndex: Number(document.querySelector('input[name="oppIndex"]:checked').value) };
+    oppIndex: Number(document.querySelector('input[name="oppIndex"]:checked').value), brain: $("brain").value || null };
 }
 function refreshSetList() {
-  const { challenge, battle } = runInputs();
-  const keys = setChoices({ challenge, battle, bracketOnly: $("bracketOnly").checked });
+  const { challenge, battle, brain } = runInputs();
+  const keys = setChoices({ challenge, battle, bracketOnly: $("bracketOnly").checked, brain });
+  $("bracketRow").hidden = !!brain;
   labelToKey.clear();
   setLabels = keys.map((k) => { labelToKey.set(setLabel(k), k); return setLabel(k); });
   // keep every set resolvable by name even when filtered out of the list
@@ -116,6 +117,21 @@ function refreshSetList() {
 }
 const keyOf = (label) => labelToKey.get(label.trim()) ?? null;
 let setLabels = [];
+const combos = {};
+
+// Spenser on/off (by hand, or because the challenge/battle is his): the list
+// becomes his three; the set box gets his lead when you face their 1st, and is
+// cleared when it holds a set that no longer fits (his lead as 2nd/3rd, or a
+// Brain set once the Brain is off).
+function brainChanged() {
+  const { brain, oppIndex } = runInputs();
+  refreshSetList();
+  const cur = keyOf($("oppSet").value);
+  if (brain && oppIndex === 1) combos.oppSet.set(setLabels[0]); // his lead is always slot 0
+  else if (cur && (brain ? setLabels.indexOf(setLabel(cur)) < 1 : FRONTIER_POOL[cur].brain)) combos.oppSet.set("");
+  $("leadRow").hidden = oppIndex !== 2 || !!brain;
+  renderOppSet();
+}
 
 // Filtering dropdown for the set pickers (as on the Arena page): focus shows
 // the whole list, typing narrows it (names starting with the text first),
@@ -126,6 +142,7 @@ let setLabels = [];
 function setupCombo(inputId, listId) {
   const input = $(inputId), list = $(listId);
   let hi = -1, last = input.value;
+  combos[inputId] = { set: (v) => { input.value = v; last = v; } }; // set from code, no "change"
   const close = () => { list.classList.remove("open"); list.innerHTML = ""; hi = -1; };
   const choose = (v) => { input.value = v; last = v; close(); input.dispatchEvent(new Event("change", { bubbles: true })); };
   const mark = (items) => { items.forEach((el, i) => el.classList.toggle("hi", i === hi)); if (hi >= 0) items[hi].scrollIntoView({ block: "nearest" }); };
@@ -169,6 +186,7 @@ function renderOppSet() {
   $("oppAbility").innerHTML = e.abilities.map((a) => opt(a, a, a === prevAb)).join("");
   const odds = ivTierOdds(key, runInputs());
   const prevIv = $("oppIv").value;
+  if (e.brain) { $("oppIv").innerHTML = opt(e.fixedIV, `${e.fixedIV} (fixed: Frontier Brain)`, true); return; }
   const tiers = odds.length ? odds : (e.ivTiers ?? [31]).map((iv) => ({ iv, p: null }));
   $("oppIv").innerHTML = tiers.map((t, i) => opt(t.iv, `${t.iv}${t.p != null ? ` (${pct(t.p)}${i === 0 ? ", most likely" : ""})` : ""}`, String(t.iv) === prevIv)).join("");
 }
@@ -180,7 +198,7 @@ function readForm() {
   const oppKey = keyOf($("oppSet").value);
   if (!oppKey) throw new Error("Pick the opponent's set.");
   const run = runInputs();
-  if (run.oppIndex === 2) run.leadKey = keyOf($("leadSet").value);
+  if (run.oppIndex === 2 && !run.brain) run.leadKey = keyOf($("leadSet").value);
   const side = (s) => ({ reflect: $(`${s}-reflect`).checked, reflectTurns: Number($(`${s}-reflectTurns`).value),
     lightScreen: $(`${s}-ls`).checked, lightScreenTurns: Number($(`${s}-lsTurns`).value), spikes: Number($(`${s}-spikes`).value) });
   return {
@@ -304,9 +322,10 @@ function init() {
   for (const ev of ["input", "change"]) document.addEventListener(ev, (e) => {
     if (!e.target.classList?.contains("trigger") && e.target.name !== "outMon") return;
     if (e.target.id === "o-status") syncStatusRows("o");
-    if (["challenge", "battle", "bracketOnly"].includes(e.target.id)) refreshSetList();
+    if (["challenge", "battle"].includes(e.target.id) && e.type === "change") $("brain").value = brainFor(runInputs()) ?? "";
+    if (["challenge", "battle", "brain"].includes(e.target.id) || e.target.name === "oppIndex") brainChanged();
+    else if (e.target.id === "bracketOnly") refreshSetList();
     if (["oppSet", "challenge", "battle"].includes(e.target.id)) renderOppSet();
-    if (e.target.name === "oppIndex") $("leadRow").hidden = runInputs().oppIndex !== 2;
     clearTimeout(refresh.t); refresh.t = setTimeout(refresh, 120);
   });
   $("solveBtn").addEventListener("click", solve);

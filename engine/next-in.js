@@ -47,8 +47,32 @@ import { SPECIES } from "./species-data.js";
 
 const HIGH_TIER = 849; // FRONTIER_MONS_HIGH_TIER, include/constants/battle_frontier_mons.h
 const POOL_BY_ID = [];
-for (const [key, e] of Object.entries(FRONTIER_POOL)) POOL_BY_ID[e.index] = { key, ...e };
+for (const [key, e] of Object.entries(FRONTIER_POOL)) if (Number.isInteger(e.index)) POOL_BY_ID[e.index] = { key, ...e };
 export const poolEntry = (id) => POOL_BY_ID[id];
+
+// The Palace's Frontier Brain, Spenser: a fixed team per symbol, in party
+// order (sFrontierBrainsMons[FRONTIER_FACILITY_PALACE], src/frontier_util.c:
+// 213-269). CreateFrontierBrainPokemon (frontier_util.c:2497-2547) creates all
+// three in that order, every one at the Brain's fixedIV, so slot 0 always
+// leads. He comes at win streak 21 (Silver) and 42 (Gold), and with both
+// symbols at 21 and every 21 after 42 (sFrontierBrainStreakAppearances
+// [PALACE] = {21, 42, 21, 1}, frontier_util.c:90; GetFrontierBrainStatus
+// :1656). His battle runs the same AI flags as any Frontier battle
+// (BattleAI_SetupFlags, battle_ai_script_commands.c:371).
+// Brain sets have no frontier index; they get ids from BRAIN_ID_BASE here.
+export const BRAIN_TEAMS = {
+  "Spenser Silver": ["Spenser Silver Crobat", "Spenser Silver Slaking", "Spenser Silver Lapras"],
+  "Spenser Gold": ["Spenser Gold Arcanine", "Spenser Gold Slaking", "Spenser Gold Suicune"],
+};
+const BRAIN_ID_BASE = 10000;
+const BRAIN_ID = new Map();
+for (const team of Object.values(BRAIN_TEAMS)) for (const key of team) {
+  const e = FRONTIER_POOL[key];
+  if (!e?.brain) throw new Error(`next-in: Brain set "${key}" missing from frontier-pool.js`);
+  const id = BRAIN_ID_BASE + BRAIN_ID.size;
+  BRAIN_ID.set(key, id);
+  POOL_BY_ID[id] = { key, ...e, index: id };
+}
 
 // GetFrontierTrainerFixedIvs (src/battle_tower.c:3288-3309).
 export function fixedIvs(id) {
@@ -321,17 +345,32 @@ export function shareOf(table, curHp) {
 // in second also tells something about the third (GetMostSuitable chose it
 // over the third against your mon at the time) -- that evidence is not used.
 // (Fighting the THIRD mon: no replacement; do not build a next-in.)
-export function makeNextIn({ lead, second = null, challenge, battle, trainerId } = {}, warm = null) {
+//
+// brain: "Spenser Silver" / "Spenser Gold" -- his team is known, so the
+// teammates are his slots 1 and 2 with certainty (lead must be his slot 0);
+// challenge / battle / trainerId are not used.
+export function makeNextIn({ lead, second = null, challenge, battle, trainerId, brain = null } = {}, warm = null) {
   const e = FRONTIER_POOL[lead];
   if (!e) throw new Error(`next-in: no frontier set named "${lead}"`);
   const e2 = second != null ? FRONTIER_POOL[second] : null;
   if (second != null && !e2) throw new Error(`next-in: no frontier set named "${second}"`);
-  const dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
+  const idOf = (key) => BRAIN_ID.get(key) ?? FRONTIER_POOL[key].index;
+  let dist;
+  if (brain) {
+    const team = BRAIN_TEAMS[brain];
+    if (!team) throw new Error(`next-in: no Frontier Brain team "${brain}"`);
+    if (lead !== team[0]) throw new Error(`${brain.split(" ")[0]} always sends out ${FRONTIER_POOL[team[0]].species} first`);
+    if (second != null && !team.slice(1).includes(second)) throw new Error(`${second} is not one of ${brain}'s other two (${team.slice(1).join(", ")})`);
+    dist = [{ p: 1, slots: [idOf(team[1]), idOf(team[2])], ivs: FRONTIER_POOL[team[0]].fixedIV }];
+  } else {
+    if (e.brain) throw new Error(`next-in: ${lead} is a Frontier Brain set -- pass brain`);
+    dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
+  }
   let thirdDist = null;
   if (e2) {
     const m = new Map();
     for (const d of dist) {
-      const i = d.slots.indexOf(e2.index);
+      const i = d.slots.indexOf(idOf(second));
       if (i < 0) continue;
       const third = d.slots[1 - i], k = `${third}|${d.ivs}`;
       const cur = m.get(k);
@@ -365,5 +404,5 @@ export function makeNextIn({ lead, second = null, challenge, battle, trainerId }
     return share;
   }
   const exportCache = () => ({ dist, repl: [...replCache], tables: [...tableCache] });
-  return { spec: { lead, second, challenge, battle, trainerId }, lead, leadId: e.index, dist, replacements, expectedHitShare, exportCache };
+  return { spec: { lead, second, challenge, battle, trainerId, brain }, lead, leadId: idOf(lead), dist, replacements, expectedHitShare, exportCache };
 }

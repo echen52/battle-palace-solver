@@ -54,6 +54,8 @@ try {
   ok(await page.locator(".mon-card").count() === 3, "three mon cards after 'Use team'");
   await page.selectOption("#challenge", "3");
   await page.selectOption("#battle", "7");
+  ok(await page.inputValue("#brain") === "Spenser Silver", "challenge 3 battle 7 picks Spenser Silver by default");
+  await page.selectOption("#brain", ""); // a normal trainer (as when you hold Silver but not Gold)
   await page.fill("#oppSet", "Salamence 1");
   await page.dispatchEvent("#oppSet", "change");
   await page.waitForTimeout(400);
@@ -119,6 +121,27 @@ try {
   await page.click("#stopBtn");
   await page.waitForFunction(() => /stopped/.test(document.getElementById("progress").textContent), null, { timeout: 30000 });
   ok(true, "Stop ends a running solve");
+
+  // Spenser: challenge 6, battle 7 is his Gold battle -- picked for you, his
+  // lead filled in, his IVs fixed; the page's solve (his team's next-in in the
+  // workers) agrees with Node's on the same position.
+  await page.selectOption("#challenge", "6"); await page.selectOption("#battle", "7"); await page.waitForTimeout(400);
+  ok(await page.inputValue("#brain") === "Spenser Gold" && await page.inputValue("#oppSet") === "Spenser Gold Arcanine"
+    && (await page.textContent("#oppIv")).startsWith("31 (fixed") && await page.locator("#bracketRow").isHidden(), "challenge 6 battle 7: Spenser Gold, Arcanine, IV 31 fixed");
+  await page.click("#oppSet");
+  ok((await page.$$eval("#oppSetList .combo-item", (e) => e.map((x) => x.textContent))).join() === "Spenser Gold Arcanine,Spenser Gold Slaking,Spenser Gold Suicune", "the list is his three");
+  await page.click("h1");
+  await page.selectOption("#oppAbility", "Intimidate"); await page.selectOption("#budget", "30000");
+  await page.click("#solveBtn");
+  await page.waitForFunction(() => /playouts · /.test(document.getElementById("progress").textContent) && !document.getElementById("solveBtn").disabled, null, { timeout: 120000 });
+  const bRows = await page.$$eval("#optionsTable tbody tr", (trs) => trs.map((tr) => [...tr.children].map((td) => td.textContent.trim())));
+  const bForm = { ...form, opp: { ...form.opp, setKey: "Spenser Gold Arcanine", ability: "Intimidate", ivTier: 31 }, run: { challenge: 6, battle: 7, oppIndex: 1, brain: "Spenser Gold" } };
+  const bFight = U.buildFight(bForm);
+  const bNode = U.resultRows((await MP.solveFight({ ...bFight.tctx, nextIn: N.makeNextIn(bFight.tctx.nextInSpec) }, bFight.start, { budgetMs: 30000 })).levers, bFight.labels);
+  ok(bRows.length === 3 && bNode.every((nr) => { const pr = bRows.find((r) => r[0].includes(nr.label)); return pr && Math.abs(pageScore(pr) - nr.score) <= pageMargin(pr) + nr.margin + 0.002; }),
+    `vs Spenser's Arcanine the page agrees with Node (page ${bRows.map((r) => `${r[0]} ${r[1]}`).join(" | ")}; node ${bNode.map((r) => `${r.label} ${r.score.toFixed(3)}±${r.margin.toFixed(3)}`).join(" | ")})`);
+  await page.selectOption("#battle", "6"); await page.waitForTimeout(400);
+  ok(await page.inputValue("#brain") === "" && await page.inputValue("#oppSet") === "" && await page.locator("#bracketRow").isVisible(), "battle 6: Brain off, his set cleared");
 
   // A saved team survives a reload.
   await page.fill("#teamName", "test team");

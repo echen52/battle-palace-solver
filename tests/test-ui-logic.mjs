@@ -88,6 +88,26 @@ const st = (form) => U.buildFight(form).start[0].state;
   ok(new Set(f.start.map((v) => `${v.state.youSleepTurns}|${v.state.oppSleepTurns}`)).size === 8 && f.start.every((v) => v.state.youBench[1].sleepTurns === 3), "every combination once; the benched Rest sleeper's counter is 3");
 }
 
+// ── the Frontier Brain ─────────────────────────────────────────────────────
+{
+  ok(U.brainFor({ challenge: 3, battle: 7 }) === "Spenser Silver" && U.brainFor({ challenge: 6, battle: 7 }) === "Spenser Gold"
+    && U.brainFor({ challenge: 3, battle: 6 }) === null && U.brainFor({ challenge: 8, battle: 7 }) === null && U.brainFor({ challenge: 1, battle: 7 }) === null,
+    "Spenser at streak 21 and 42 (challenge 3 and 6, battle 7); 8+ left to you");
+  ok(U.setChoices({ challenge: 3, battle: 7, brain: "Spenser Silver" }).join() === "Spenser Silver Crobat,Spenser Silver Slaking,Spenser Silver Lapras", "his list: his three, lead first");
+  ok(JSON.stringify(U.ivTierOdds("Spenser Gold Suicune", { challenge: 6, battle: 7 })) === '[{"iv":31,"p":1}]', "his IVs: fixed");
+  const sp = (key, idx, brain = "Spenser Silver", ability = null) => base({ opp: { ...base().opp, setKey: key, ability, ivTier: 16 }, run: { challenge: 3, battle: 7, oppIndex: idx, brain } });
+  const f1 = U.buildFight(sp("Spenser Silver Crobat", 1));
+  ok(f1.tctx.opp.species === "Crobat" && f1.tctx.opp.stats.hp === 172 && f1.tctx.nextInSpec.brain === "Spenser Silver" && f1.tctx.nextInSpec.lead === "Spenser Silver Crobat"
+    && f1.tctx.nextInSpec.second === null && f1.tctx.oppReserves === 2 && f1.notes.length === 0, "vs his lead: Crobat at IV 16 (HP 172), next-in from his team, two in reserve");
+  const f2 = U.buildFight(sp("Spenser Silver Lapras", 2, "Spenser Silver", "Water Absorb"));
+  ok(f2.tctx.nextInSpec.second === "Spenser Silver Lapras" && f2.tctx.nextInSpec.lead === "Spenser Silver Crobat" && f2.tctx.oppReserves === 1, "vs his 2nd: lead filled in from his team");
+  ok(U.buildFight(sp("Spenser Silver Slaking", 3)).tctx.nextInSpec === null, "vs his 3rd: no next-in");
+  ok(throws(() => U.buildFight(sp("Spenser Silver Slaking", 1)), /always sends out Crobat first/), "a non-lead as his 1st: refused");
+  ok(throws(() => U.buildFight(sp("Spenser Silver Crobat", 2)), /Crobat is Spenser's first/), "his lead as 2nd: refused");
+  ok(throws(() => U.buildFight(sp("Spenser Gold Suicune", 2)), /not on Spenser Silver's team/), "a Gold mon in a Silver battle: refused");
+  ok(throws(() => U.buildFight(sp("Spenser Silver Crobat", 1, null)), /Frontier Brain set: pick the Brain battle/), "a Brain set with the Brain off: refused");
+}
+
 // ── lists and results ──────────────────────────────────────────────────────
 {
   const all = U.setChoices({});

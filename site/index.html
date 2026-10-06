@@ -80,6 +80,14 @@
         <input type="radio" name="oppIndex" value="3" id="oppIdx3" class="trigger" /><label for="oppIdx3" class="btn">3rd</label>
       </span>
     </div>
+    <div class="field-row">
+      <label for="brain" title="Spenser, the Palace's Frontier Brain, is the 7th battle of challenges 3 (Silver) and 6 (Gold): picked for you there. Holding Silver but not Gold, battle 21 is a normal trainer: set No. With both symbols he also comes back at streak 63, 84, ... (inside 8+): pick him by hand.">Brain</label>
+      <select id="brain" class="trigger">
+        <option value="">No (a Frontier trainer)</option>
+        <option value="Spenser Silver">Spenser, Silver</option>
+        <option value="Spenser Gold">Spenser, Gold</option>
+      </select>
+    </div>
     <div class="field-row" id="leadRow" hidden>
       <label for="leadSet" title="Their first Pokémon: with it, the last one they can send is narrowed down.">Their 1st was</label>
       <div class="combo-wrap"><input type="text" id="leadSet" class="trigger combo-input" placeholder="Type to search sets…" autocomplete="off" /><div class="combo-list" id="leadSetList"></div></div>
@@ -160,7 +168,7 @@
       <label for="oppSet">Set</label>
       <div class="combo-wrap"><input type="text" id="oppSet" class="trigger combo-input" placeholder="Type to search sets…" autocomplete="off" /><div class="combo-list" id="oppSetList"></div></div>
     </div>
-    <div class="field-row">
+    <div class="field-row" id="bracketRow">
       <input type="checkbox" id="bracketOnly" class="trigger" checked /><label for="bracketOnly" class="chk-label">Only sets this challenge can have</label>
     </div>
     <div id="oppCard" class="set-card" hidden></div>

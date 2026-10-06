@@ -199,5 +199,59 @@ const team = SD.buildTeam(fs.readFileSync(path.join(here, "../teams/user-test-te
   ok(throws(() => N.makeNextIn({ lead: "Salamence 1", second: "Sunkern 1", challenge: 3, battle: 7 }), /cannot be/), "an impossible second throws");
 }
 
+// ── the Frontier Brain (Spenser) ───────────────────────────────────────────
+{
+  // His two teams vs sFrontierBrainsMons[FRONTIER_FACILITY_PALACE] parsed from
+  // the decomp itself, in party order (evs there: hp atk def spe spa spd).
+  const src = fs.readFileSync(path.join(here, "../../pokeemerald/src/frontier_util.c"), "utf8");
+  const start = src.search(/\[FRONTIER_FACILITY_PALACE\] =\s*\n/), end = src.indexOf("[FRONTIER_FACILITY_ARENA] =", start);
+  const block = src.slice(start, end);
+  const word = (w) => w.split("_").map((x) => x[0] + x.slice(1).toLowerCase()).join(" ");
+  const ITEM = { BRIGHT_POWDER: "BrightPowder", KINGS_ROCK: "King's Rock" }, MOVE = { EXTREME_SPEED: "ExtremeSpeed" };
+  const mons = [...block.matchAll(/\.species = SPECIES_(\w+),\s*\.heldItem = ITEM_(\w+),\s*\.fixedIV = (\w+),\s*\.nature = NATURE_(\w+),\s*\.evs = \{([^}]*)\},\s*\.moves = \{([^}]*)\}/g)]
+    .map(([, sp, it, iv, nat, evs, mv]) => {
+      const [hp, atk, def, spe, spa, spd] = evs.split(",").map(Number);
+      return { species: word(sp), item: ITEM[it] ?? word(it), iv: iv === "MAX_PER_STAT_IVS" ? 31 : Number(iv), nature: word(nat),
+        evs: { hp, atk, def, spa, spd, spe }, moves: mv.split(",").map((m) => m.trim().replace("MOVE_", "")).map((m) => MOVE[m] ?? word(m)) };
+    });
+  const keys = [...N.BRAIN_TEAMS["Spenser Silver"], ...N.BRAIN_TEAMS["Spenser Gold"]];
+  const same = mons.length === 6 && keys.every((k, i) => {
+    const e = P[k], d = mons[i];
+    return e.brain && e.species === d.species && e.item === d.item && e.fixedIV === d.iv && e.nature === d.nature
+      && JSON.stringify(e.evs) === JSON.stringify(d.evs) && JSON.stringify(e.moves) === JSON.stringify(d.moves);
+  });
+  ok(same, `Spenser's 6 sets = the decomp's, in party order (${mons.map((m) => m.species).join(", ")})`);
+
+  // Who comes in when his lead faints: GetMostSuitableMonToSwitchInto over his
+  // slots 1-2, worked by hand. The typing pass takes the teammate YOUR types
+  // hit hardest, then needs a super-effective move from it.
+  const pick = (brain, you, ab = "x") => {
+    const t = N.BRAIN_TEAMS[brain], lead = { "Spenser Silver": ["Poison", "Flying"], "Spenser Gold": ["Fire"] }[brain];
+    const r = N.makeNextIn({ lead: t[0], brain }).replacements({ types: you, ability: ab, foresighted: false }, { types: lead });
+    return r.length === 1 && r[0].p === 1 ? `${N.poolEntry(r[0].id).key} ${Object.keys(r[0].by)} ${r[0].ivs}` : JSON.stringify(r);
+  };
+  // Metagross: Slaking (10) ties Lapras (Steel x Water/Ice = 0.5 x 2 = 10), first wins; Earthquake is SE.
+  ok(pick("Spenser Silver", ["Steel", "Psychic"]) === "Spenser Silver Slaking typing 16", `Silver vs Metagross: ${pick("Spenser Silver", ["Steel", "Psychic"])}`);
+  // Swampert: Slaking 10 > Lapras 5, but no SE move; Lapras has none either -> damage fallback, all 3s, first wins.
+  ok(pick("Spenser Silver", ["Water", "Ground"]) === "Spenser Silver Slaking damage 16", `Silver vs Swampert: ${pick("Spenser Silver", ["Water", "Ground"])}`);
+  // Sceptile: Grass hits Lapras 2x (20) > Slaking 10; Ice Beam is SE.
+  ok(pick("Spenser Silver", ["Grass"]) === "Spenser Silver Lapras typing 16", `Silver vs a Grass type: ${pick("Spenser Silver", ["Grass"])}`);
+  ok(pick("Spenser Gold", ["Grass"]) === "Spenser Gold Suicune typing 31", `Gold vs a Grass type: ${pick("Spenser Gold", ["Grass"])} (Blizzard)`);
+  ok(pick("Spenser Gold", ["Dragon", "Psychic"], "Levitate") === "Spenser Gold Slaking typing 31", `Gold vs Latios: ${pick("Spenser Gold", ["Dragon", "Psychic"], "Levitate")} (Shadow Ball)`);
+
+  const t = N.BRAIN_TEAMS["Spenser Silver"];
+  const last = N.makeNextIn({ lead: t[0], second: t[2], brain: "Spenser Silver" }).replacements({ types: ["Grass"], ability: "x" }, { types: ["Water", "Ice"] });
+  ok(last.length === 1 && N.poolEntry(last[0].id).key === t[1] && last[0].p === 1, "facing his 2nd: the last one is the other, for certain");
+  ok(throws(() => N.makeNextIn({ lead: t[1], brain: "Spenser Silver" }), /always sends out Crobat first/), "his lead is always slot 0");
+  ok(throws(() => N.makeNextIn({ lead: t[0], second: t[0], brain: "Spenser Silver" }), /not one of/)
+    && throws(() => N.makeNextIn({ lead: t[0], second: "Spenser Gold Suicune", brain: "Spenser Silver" }), /not one of/), "his 2nd must be one of his other two");
+  ok(throws(() => N.makeNextIn({ lead: t[0], challenge: 3, battle: 7 }), /Frontier Brain set/), "a Brain set without brain: refused, not drawn from the trainer pool");
+  // The replacement is built at his fixed IVs: same stats as the opponent builder.
+  const lap = N.makeNextIn({ lead: t[0], brain: "Spenser Silver" }).replacements({ types: ["Grass"], ability: "x" }, { types: ["Poison", "Flying"] })[0];
+  const built = N.buildReplacement(lap.id, lap.ivs), direct = L.buildMon(getOpponentConfig("Spenser Silver Lapras", { ability: "Water Absorb" }));
+  ok(built.length === 2 && JSON.stringify(built[0].mon.stats) === JSON.stringify(direct.stats) && direct.stats.hp === 198,
+    `his Lapras as the replacement: IV 16, both abilities half each, stats as built directly (HP ${direct.stats.hp})`);
+}
+
 console.log(`test-next-in: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
