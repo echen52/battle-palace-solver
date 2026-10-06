@@ -218,6 +218,36 @@ Steps:
    the issue (~6 s a decision): measure, then cache (e.g. the first decision
    of a battle depends only on the lead set / IV / ability).
 6. Run the user's teams; report per-battle win rate and streak with CIs.
+   FIRST RUN (2026-10-05/06, budget 2 s, 7 workers each; stopped by the
+   user at Swampert 822 / Suicune 803): 95.98% vs 96.63%, paired 20 vs 25
+   (p 0.55). INVALID -- made before the budget fix below; to be rerun (user:
+   not yet, 2026-10-06). The Swampert process hit its 4 GB heap at ~820
+   battles (solveCache grows without bound; resume works).
+   BUDGET BUG (fixed 7b93135): when the exact first turn alone outran the
+   budget (~3 s root vs 2 s), runSolve stopped before any rollout and every
+   open lever scored root.score + open x 0 (Latios vs Spenser Suicune: 0.009
+   vs 0.000). Now the budget never stops an open lever below minRollouts
+   (solve-core.js and solveMC). test-montecarlo covers it.
+   TRACING: streak.mjs --only <n,...|spenser> --trace <file>; DUMP_LOW=<x>
+   dumps states scoring below x; sim/debug-dump.mjs re-solves one.
+
+Open notes (user, 2026-10-06; several more teams to come):
+- (b) The user's Spenser Gold line, to script for Spenser battles only (not
+  built): turn 1 switch to the water mon; beat Arcanine (Roar -> switch back
+  to the water mon); take Slaking's first move; switch to Latios on a
+  Truant (loaf) turn; Metagross on Slaking's active turn if Latios is not
+  behind a Sub; back to Latios on the loaf turn; Suicune faced by Latios.
+  Open question to the user: Latios switched in on a loaf turn faces an
+  ACTING Slaking next with no Sub up -- when does "see what Latios does"
+  happen? Decomp: a Truant mon replacing a fainted one LOAFS its first turn
+  (battle_script_commands.c:5258-5261 sets the counter on entry; the
+  end-turn toggle, battle_util.c:2654, already ran).
+- (c) Two-decision lookahead: rollouts now assume "stay" after the lever's
+  first turn, so pivot cycles (Latios <-> Metagross vs Slaking) are only
+  found one switch at a time. Needs no opponent team knowledge (the fight is
+  vs the mon in front); cost is choosing turn 2 at every turn-1 outcome
+  (hundreds to tens of thousands) -- cheap version: a few dozen rollouts per
+  option there, ~3-10x slower. Not started.
 
 ## Side finding
 
