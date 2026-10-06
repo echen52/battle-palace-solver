@@ -5,7 +5,7 @@
 //   node sim/cb-grid.mjs [--battles 1000] [--seed 1] [--out results/screen/cb]
 //
 // CB users (lead, slot 0): Metagross (teams/user-test-team.txt, the known
-// baseline) + the user's five in teams/cb/all-sets.txt. Supports: Swampert,
+// baseline) + the user's six in teams/cb/all-sets.txt (Salamence added 2026-10-06). Supports: Swampert,
 // Latios, Suicune (the user's team files) + Snorlax, Registeel, Regice.
 // Items: the Frontier forbids two of the same item; when a pair clashes the
 // user allowed Leftovers / Lum Berry / Chesto Berry (Chesto only on a Rest
@@ -36,7 +36,7 @@ for (const f of ["teams/user-test-team.txt", "teams/mlsuicune.txt", "teams/cb/al
     if (!blocks.has(sp)) blocks.set(sp, b);
   }
 }
-const CB = ["Metagross", "Heracross", "Ursaring", "Aerodactyl", "Slaking", "Tauros"];
+const CB = ["Metagross", "Salamence", "Heracross", "Ursaring", "Aerodactyl", "Slaking", "Tauros"];
 const SUPPORT = ["Swampert", "Latios", "Suicune", "Snorlax", "Registeel", "Regice"];
 for (const sp of [...CB, ...SUPPORT]) if (!blocks.has(sp)) throw new Error(`cb-grid: no set for ${sp}`);
 const itemOf = (sp) => blocks.get(sp).split("\n")[0].split("@")[1].trim();

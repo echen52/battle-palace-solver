@@ -77,3 +77,13 @@ IVs: 0 Atk
 - Thunderbolt
 - Amnesia
 - Rest
+
+Salamence @ Choice Band
+Ability: Intimidate
+Level: 50
+EVs: 252 Atk / 4 SpD / 252 Spe
+Sassy Nature
+- Aerial Ace
+- Earthquake
+- Rock Slide
+- Brick Break
