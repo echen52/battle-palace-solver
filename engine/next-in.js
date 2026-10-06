@@ -196,6 +196,38 @@ function typeCalc(move, atkTypes, def, dmg) {
   return { flags, dmg };
 }
 
+// AI_TypeCalc (src/battle_script_commands.c:1594-1636): the AI's flags for a
+// move into a SPECIES (its base types, not the battler's current ones) with
+// an ability. Unlike TypeCalc it never stops at the Foresight marker (Ghost
+// immunities always apply), and Wonder Guard adds "doesn't affect" to any
+// non-super-effective damaging move. Struggle: 0. Bits: MISSED 1, SE 2,
+// NVE 4, DOESNT_AFFECT_FOE 8 (MOVE_RESULT_*).
+export const AI_FLAG = { MISSED, SE, NVE, DOESNT_AFFECT: NO_EFFECT };
+export function aiTypeCalc(move, targetSpecies, targetAbility) {
+  if (move === "Struggle") return 0;
+  const m = L.MOVES[move];
+  const moveType = m.type;
+  const [t1, t2] = speciesTypes(targetSpecies);
+  let flags = 0;
+  const mod2 = (mul) => {
+    if (mul === 0) { flags |= NO_EFFECT; flags &= ~NVE; flags &= ~SE; }
+    else if (mul === 5 && m.power && !(flags & (MISSED | NO_EFFECT))) { if (flags & SE) flags &= ~SE; else flags |= NVE; }
+    else if (mul === 20 && m.power && !(flags & (MISSED | NO_EFFECT))) { if (flags & NVE) flags &= ~NVE; else flags |= SE; }
+  };
+  if (targetAbility === "Levitate" && moveType === "Ground") {
+    flags = MISSED | NO_EFFECT;
+  } else {
+    for (const r of ROWS) {
+      if (r === "FORESIGHT") continue;
+      if (r[0] !== moveType) continue;
+      if (r[1] === t1) mod2(r[2]);
+      if (r[1] === t2 && t1 !== t2) mod2(r[2]);
+    }
+  }
+  if (targetAbility === "Wonder Guard" && (!(flags & SE) || (flags & (SE | NVE)) === (SE | NVE)) && m.power) flags |= NO_EFFECT;
+  return flags;
+}
+
 const speciesTypes = (species) => {
   const t = SPECIES[species].types;
   return [t[0], t[1] ?? t[0]];

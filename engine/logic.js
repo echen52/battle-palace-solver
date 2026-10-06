@@ -5144,6 +5144,13 @@ function buildStartState({ yourHpPct = 100, oppHpPct = 100, yourHpPctAtStart = y
     // (MOVEEND_UPDATE_LAST_MOVES, src/battle_script_commands.c:4404-4414).
     // Cmd_setprotectlike reads it (:6498-6501). See protectUsesFor.
     youLastResultingMove: null, oppLastResultingMove: null,
+    // PALACE FORK (Phase E): gLastLandedMoves -- the last move that LANDED on
+    // this battler (obeyed, no MOVE_RESULT_NO_EFFECT), or null for MOVE_NONE /
+    // MOVE_UNAVAILABLE (the ROM's gBattleMoves[0xFFFF] reads as row 0: power 0,
+    // Normal -- arena-solver phase-d-log, so the two are alike to every reader).
+    // Read by the opponent's ShouldSwitch (engine/should-switch.js). See
+    // updateLastLanded.
+    youLastLanded: null, oppLastLanded: null,
     // PALACE FORK: PP. `xPP` is gBattleMons[].pp, per slot of the moves in
     // use (Transform / Mimic included); `xPartyPP` is the party mon's PP for
     // its own moves -- they differ only while a slot is Transformed or
@@ -7809,6 +7816,7 @@ function applyMove(ctx, s, actor, ...rest) {
   const selfPre = s[selfKey], foePre = s[foeKey];
   const itemOvKey = isYou ? "youItemOverride" : "oppItemOverride";
   _changedItemsActor = null;
+  _statusResult = null;
   // F31 (opt-in exact roll): the drawn roll(s) ride on this action's ctx --
   // a number for one hit, an array per hit -- read by battleDamageOptions and
   // the confusion self-hit. Without ctx.exactRoll no outcome carries one.
@@ -7872,7 +7880,42 @@ function applyMove(ctx, s, actor, ...rest) {
   // unparalysed that same turn (emulator: traces-given/00832).
   tryCureWithBerry(s, "you", ctx.you);
   tryCureWithBerry(s, "opp", ctx.opp);
+  updateLastLanded(ctx, s, actor, rest);
 }
+// PALACE FORK (Phase E): gLastLandedMoves after an action.
+// MOVEEND_UPDATE_LAST_MOVES (src/battle_script_commands.c:4400-4434) writes
+// the TARGET's entry: the executed move (gCurrentMove: a called move, not the
+// caller) when the move obeyed and had no MOVE_RESULT_NO_EFFECT (missed,
+// blocked by Protect, no effect -- type immunity, Levitate, Wonder Guard, an
+// absorbing ability -- or failed), else MOVE_UNAVAILABLE. Then
+// HandleAction_ActionFinished clears the ATTACKER's own entry
+// (src/battle_util.c:675). A move aimed at the user (Swords Dance, Rest)
+// writes the user's own entry, which that clears: the foe's is untouched.
+// Stated approximation: a status move counts as failed when its executor
+// says so ("failed" / "missed"); that matters only to ShouldSwitchIfNaturalCure.
+function updateLastLanded(ctx, s, actor, rest) {
+  const [chosen, hit, selfHit, , statusPrevented, , , , , , blockedByProtect, attractPrevented] = rest;
+  const executed = rest[16] ?? chosen;
+  const isYou = actor === "you";
+  const self = isYou ? ctx.you : ctx.opp, foe = isYou ? ctx.opp : ctx.you;
+  s[actor + "LastLanded"] = null;
+  if (moveTarget(executed) === "MOVE_TARGET_USER") return;
+  const soundproofed = foe.ability === "Soundproof" && SOUND_MOVES.has(executed);
+  let landed = hit === true && !selfHit && !statusPrevented && !attractPrevented && !soundproofed && !blockedByProtect;
+  if (landed) {
+    const md = battleMoveData(self, executed);
+    if (md.power > 0) {
+      const foreseen = s[isYou ? "oppForesighted" : "youForesighted"];
+      if (executed !== "Struggle" && typeEffectiveness(md.type, foe.types, foreseen) === 0) landed = false;
+      else if (resolveAbilityInteraction(executed, md, self, foe, foreseen).type !== "normal") landed = false;
+    } else if (_statusResult === "failed" || _statusResult === "missed") {
+      landed = false;
+    }
+  }
+  s[(isYou ? "opp" : "you") + "LastLanded"] = landed ? executed : null;
+}
+// The executor's return for the action in progress (read by updateLastLanded).
+let _statusResult = null;
 // F26: set by a successful Trick / Thief during the current action (whose
 // attacker then holds nothing until MOVEEND_CHANGED_ITEMS); read and reset by
 // applyMove. Module-level because it must not enter the state.
@@ -9088,9 +9131,10 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
   } else {
     const executor = EFFECT_EXECUTORS[moveData.effect];
     if (executor) {
-      // An executor's return value ("failed" / "missed" / { printed }) fed only
-      // the Arena's Skill scoring; the Palace fork does not read it.
-      executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer, ctx.draw ?? null);
+      // An executor's return value ("failed" / "missed" / { printed }) fed the
+      // Arena's Skill scoring; the Palace fork reads it for gLastLandedMoves
+      // only (updateLastLanded).
+      _statusResult = executor(s, actor, ctx, moveData, sleepDuration, attractGenderCompatible, disableTimer, ctx.draw ?? null);
     } else {
       // A3: the EFFECT_TOXIC exemption that used to live on this branch is GONE.
       // It let Toxic land, score +1 Skill and apply nothing whenever the target
@@ -10888,6 +10932,10 @@ function palaceLoafOutcomes(ctx, state, actor, kind) {
 }
 function applyPalaceLoaf(ctx, s, actor, o) {
   if (o.loaf === "switched") return;
+  // a loafing turn does not obey: MOVE_UNAVAILABLE on the foe, then
+  // ActionFinished clears its own (see updateLastLanded)
+  s[actor + "LastLanded"] = null;
+  s[(actor === "you" ? "opp" : "you") + "LastLanded"] = null;
   if (o.sleepRemaining !== null) {
     if (o.sleepRemaining <= 0) {
       s[actor + "Status"] = null;

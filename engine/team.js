@@ -58,7 +58,7 @@ const VOLATILE = new Set(["youConfused", "youTauntTurns", "youDisabledMove", "yo
   "youStages", "youSeeded", "youMoveHistory", "youLastMove", "youSubstituteHP", "youDestinyBondActive", "youIngrained",
   "youFlashFireActive", "youCharging", "youEndureActive", "youProtected", "youProtectUses", "youYawnTurns",
   "youAbilityRecord", "youDamageTaken", "youLastResultingMove", "youGrudge", "youPerishCount", "youPalaceLowHp",
-  "youDraggedOut"]);
+  "youDraggedOut", "youLastLanded"]);
 
 export function classifyKey(k) {
   if (MON.has(k)) return "mon";
