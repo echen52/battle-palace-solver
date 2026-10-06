@@ -50,6 +50,18 @@ Adamant Nature
 - Shadow Ball
 - Aerial Ace`);
 
+// ── AI_TypeCalc ────────────────────────────────────────────────────────────
+{
+  const F = N.AI_FLAG, f = N.aiTypeCalc;
+  ok((f("Return", "Dusclops", "Pressure") & F.DOESNT_AFFECT) && (f("Brick Break", "Gengar", "Levitate") & F.DOESNT_AFFECT),
+    "Normal / Fighting into a Ghost: doesn't affect (the rows after the Foresight marker always apply)");
+  ok(f("Earthquake", "Gengar", "Levitate") === (F.MISSED | F.DOESNT_AFFECT), "Ground into Levitate: missed + doesn't affect");
+  ok(f("Earthquake", "Metagross", "Clear Body") === F.SE && f("Surf", "Vaporeon", "Water Absorb") === F.NVE, "plain super effective / not very effective");
+  ok(f("Earthquake", "Shedinja", "Wonder Guard") === (F.NVE | F.DOESNT_AFFECT) && f("Aerial Ace", "Shedinja", "Wonder Guard") === F.SE,
+    "Wonder Guard: a non-super-effective damaging move gets doesn't-affect; a super-effective one passes");
+  ok(f("Toxic", "Metagross", "Clear Body") === F.DOESNT_AFFECT && f("Struggle", "Gengar", "Levitate") === 0, "a status move only carries immunity; Struggle is 0");
+}
+
 // ── 7. the last landed move: a teammate it would not affect / resist ──────
 {
   // Magikarp out (Flail: no super-effective move on Metagross); Pidgeot 1 is
