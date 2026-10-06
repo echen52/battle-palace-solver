@@ -19,6 +19,7 @@ export function makeHandler(post) {
   return (msg) => {
     try {
       if (msg.type === "init") {
+        replCache.clear(); // its entries belong to the previous fight (a reused worker -- the streak sim)
         weights = msg.weights;
         tctx = { team: msg.team, opp: msg.opp, oppReserves: msg.oppReserves ?? 2, exactRoll: !!msg.exactRoll, ...(msg.nextInSpec ? { nextIn: makeNextIn(msg.nextInSpec, msg.nextInWarm ?? null) } : {}) };
         start = asMix(msg.start);
