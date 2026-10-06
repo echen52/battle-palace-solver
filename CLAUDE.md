@@ -249,6 +249,38 @@ Open notes (user, 2026-10-06; several more teams to come):
   (hundreds to tens of thousands) -- cheap version: a few dozen rollouts per
   option there, ~3-10x slower. Not started.
 
+## Phase F: strategy questions (user, 2026-10-06)
+
+The user's four questions, in their order: (1) crippler + late setup sweeper,
+(2) low-HP Destiny Bond users, (3) Dragon Dance / Swords Dance vs Curse /
+Calm Mind, (4) Choice Band users beyond Metagross / Salamence / Heracross and
+their teammates. Agreed plan: a CHEAP SCREEN (no solver) for many variants,
+then the solver sim on finalists. Sets: Emerald-legal sources only (level-up,
+TM, tutor, egg -- from the decomp's learnsets). Order: build the screen, then
+CB (4), then DD vs Curse (3) and DB (2), crippler (1) last with a scripted
+policy. Palace facts used (palace.js, from battle_moves.h and
+gBattlePalaceNatureToMoveGroupLikelihood): DD / SD / CM / Bulk Up / Agility /
+Belly Drum / Destiny Bond / Sub / Rest / Protect are DEFENSE; Curse, status
+moves, Leech Seed, Spikes are SUPPORT; Reversal / Flail / Explosion ATTACK.
+Naughty 20/70/10 -> 70/22/8 (setup healthy, attack low); Brave 70/15/15 ->
+32/60/8 (DB when low).
+
+STEP 1 DONE (801839a + tests): sim/screen-core.mjs + sim/screen.mjs. Same
+battles as the solver sim (draw.mjs, (seed, i)); policies stay / type;
+replacement = chooseReplacement. 1000 battles ~40 s (worker threads).
+Counters per slot, credited to the mon that ACTED: KOs, max boost, boost at
+1st KO, statuses dealt, DB picks / KOs, turns Choice-locked into a resist,
+faints while locked. compare.mjs prints them. test-screen 15, mutations 7/7.
+First screen (seed 1, 1000 each): Swampert team 92.4% stay / 91.7% type;
+Suicune team 95.4% / 96.0%; paired sign test p 0.003 / <0.001 (Suicune).
+NOT yet validated against the solver sim (the only solver run is the invalid
+pre-fix one) -- a post-fix paired solver sample is needed to check the
+screen ranks teams the same way.
+Engine gap found: 10 of 336 Metronome-callable moves have no executor
+(Conversion, Conversion 2, False Swipe, Vital Throw, Beat Up, Nature Power,
+Charge, Assist, Camouflage, Weather Ball); only Clefable 1 reaches them in
+the late pool; the screen records such a battle as an error.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
