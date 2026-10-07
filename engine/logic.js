@@ -5470,6 +5470,12 @@ function cloneState(s) {
   return { ...s, youStages: { ...s.youStages }, oppStages: { ...s.oppStages } };
 }
 
+// Labels only: which status stopped the action, read from the turn's START
+// state (sleep, freeze and full paralysis share statusPrevented).
+const preventedBy = (st, side) => ({ sleep: "is asleep", freeze: "is frozen solid", paralysis: "is fully paralyzed" })[st[side === "you" ? "youStatus" : "oppStatus"]] ?? "is fully paralyzed/frozen";
+// Trace text for the crit draw (critSplit's crit: a bit mask, one bit per hit;
+// multi-hit moves). Labels only -- the state already carries the damage.
+const critLabel = (c) => { const k = c ? popcount(c) : 0; return k === 0 ? "" : k === 1 ? " (critical hit)" : ` (${k} critical hits)`; };
 function describeAction(actor, moveName, hit, selfHit, statusPrevented, attractPrevented = false, hitCount = null, calledMove = null, cancelReason = null) {
   const who = actor === "you" ? "You" : "Opp";
   // B2b batch 3: a move-calling move shows BOTH names. Reading "Opp uses Sleep
@@ -11086,7 +11092,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
     if (!firstLoaf) applyMove(ctx, s, order[0], firstMove, fo.hit, fo.selfHit, fo.secondaryTriggered, fo.statusPrevented, fo.thawed, fo.endureTriggered, fo.sleepRemaining ?? null, fo.sleepDuration ?? null, fo.protectTriggered ?? false, fo.blockedByProtect ?? false, fo.attractPrevented ?? false, fo.attractGenderCompatible ?? null, fo.hitCount ?? null, fo.focusBanded ?? false, fo.disableTimer ?? null, fo.calledMove ?? null, fo.variablePower ?? null, fo.cancelReason ?? null, fo.lockTurns ?? null, fo.contactProc ?? null, fo.contactSleep ?? null, fo.crit ?? 0, fo.roll ?? null, fo.draw ?? null);
     if (bidePre1) bideAccumulate(ctx, s, bidePre1);
     const firstLabel = ctx.noLabels ? "" : firstLoaf ? describeLoaf(order[0], fo)
-      : describeAction(order[0], firstMove, fo.hit, fo.selfHit, fo.statusPrevented, fo.attractPrevented, fo.hitCount ?? null, fo.calledMove ?? null, fo.cancelReason ?? null);
+      : describeAction(order[0], firstMove, fo.hit, fo.selfHit, fo.statusPrevented, fo.attractPrevented, fo.hitCount ?? null, fo.calledMove ?? null, fo.cancelReason ?? null).replace("is fully paralyzed/frozen", preventedBy(state, order[0])) + critLabel(fo.crit);
 
     const firstActorHp = order[0] === "you" ? s.yourHpPct : s.oppHpPct;
     const secondActorHp = order[0] === "you" ? s.oppHpPct : s.yourHpPct;
@@ -11165,7 +11171,7 @@ function resolveTurnWithOrder(ctx, state, yourMove, oppMove, order, loaf = null)
       if (!secondLoaf) applyMove(ctx2, s2, applyAs, secondMove, so.hit, so.selfHit, so.secondaryTriggered, so.statusPrevented, so.thawed, so.endureTriggered, so.sleepRemaining ?? null, so.sleepDuration ?? null, so.protectTriggered ?? false, so.blockedByProtect ?? false, so.attractPrevented ?? false, so.attractGenderCompatible ?? null, so.hitCount ?? null, so.focusBanded ?? false, so.disableTimer ?? null, so.calledMove ?? null, so.variablePower ?? null, so.cancelReason ?? null, so.lockTurns ?? null, so.contactProc ?? null, so.contactSleep ?? null, so.crit ?? 0, so.roll ?? null, so.draw ?? null);
       if (bidePre2) bideAccumulate(ctx2, s2, bidePre2);
       const secondLabel = ctx.noLabels ? "" : secondLoaf ? describeLoaf(order[1], so)
-        : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null);
+        : (bounced ? "bounced: " : "") + describeAction(order[1], secondMove, so.hit, so.selfHit, so.statusPrevented, so.attractPrevented, so.hitCount ?? null, so.calledMove ?? null, so.cancelReason ?? null).replace("is fully paralyzed/frozen", preventedBy(state, order[1])) + critLabel(so.crit);
       if (s2.youDraggedOut || s2.oppDraggedOut) {
         continueAfterDrag(ctx, s, s2, pFirst * so.p, `${firstLabel}; ${secondLabel}`, results);
         continue;

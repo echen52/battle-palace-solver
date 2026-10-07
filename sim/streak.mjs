@@ -29,12 +29,16 @@ import { rng } from "../engine/montecarlo.js";
 import { rootActions } from "../engine/solve.js";
 import { runSolve } from "../engine/solve-core.js";
 import { makeDraw, seedOf, challengeOf, stageOf, isSpenser, FIRST_LATE } from "./draw.mjs";
+import { genderOf, withGender } from "./gender.mjs";
+import { chooseLever } from "./policy.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith("--") ? [...a, [x.slice(2), all[i + 1]]] : a), []));
 const TEAM_FILE = args.team, OUT = args.out;
 const BATTLES = Number(args.battles ?? 1000), SEED = Number(args.seed ?? 1), FROM = Number(args.from ?? 0);
 const BUDGET = Number(args.budget ?? 3000), WORKERS = Number(args.workers ?? Math.min(12, os.cpus().length - 1));
 const TURN_CAP = 400;
+// --stay-bias off: the old rule (highest average score, ties included)
+const STAY_BIAS = args["stay-bias"] !== "off";
 // --only 63,84 / --only spenser: play just those battle numbers (n);
 // --trace <file>: write each turn (both mons, HP, the levers' scores, what
 // happened) as text.
@@ -45,9 +49,21 @@ if (!TEAM_FILE || !OUT) throw new Error("usage: --team <file> --out <jsonl> [--b
 
 const team = buildTeam(fs.readFileSync(TEAM_FILE, "utf8"));
 const draw = makeDraw(SEED);
+// Genders, once per battle (sim/gender.mjs): the opponent's from its
+// personality (its ability bit fixes the low byte's parity); yours as the team
+// file states them -- "(M)" / "(F)" -- or else drawn once per battle too. The
+// solver is given both: the game shows each mon's gender symbol.
+const NO_GENDER = team.filter((m) => m.genderDist.length > 1).map((m) => m.species);
+if (NO_GENDER.length) console.log(`gender not stated for ${NO_GENDER.join(", ")} -- drawn once per battle`);
 function buildBattle(d, rand) {
-  const oppTeam = d.keys.map((k, i) => L.buildFrontierOpponent(getOpponentConfig(k, { ability: d.abilities[i], ivTier: d.iv, allowUnreachableTier: true })));
-  return { team, oppTeam, oppIds: d.keys.map(N.setId), rollSample: rand };
+  const oppTeam = d.keys.map((k, i) => {
+    const mon = L.buildFrontierOpponent(getOpponentConfig(k, { ability: d.abilities[i], ivTier: d.iv, allowUnreachableTier: true }));
+    const abs = N.poolEntry(N.setId(k)).abilities;
+    return withGender(mon, genderOf(SEED, d.n, "opp", i, mon.species, abs.length > 1 ? abs.indexOf(d.abilities[i]) : null));
+  });
+  const myTeam = team.map((m, j) => (m.genderDist.length > 1 ? withGender(m, genderOf(SEED, d.n, "you", j, m.species)) : m));
+  // labels: the engine's outcome text (misses, crits, full paralysis, ...) for --trace only
+  return { team: myTeam, oppTeam, oppIds: d.keys.map(N.setId), rollSample: rand, labels: !!TRACE };
 }
 
 // ── the solver, on one persistent worker pool ──────────────────────────────
@@ -72,7 +88,8 @@ const solveCache = new Map();
 let solves = 0, solveMs = 0, cacheHits = 0, exactMsSum = 0; const stopped = {};
 async function solve(B, s, spec, seed) {
   const ni = spec ? nextInFor(spec) : null;
-  const key = JSON.stringify([s, ni?.spec ?? null]);
+  // genders vary by battle (sim/gender.mjs), so they are part of the position
+  const key = JSON.stringify([s, ni?.spec ?? null, B.team.map((m) => m.genderDist[0].gender), B.oppTeam[s.oppActive].genderDist[0].gender]);
   if (solveCache.has(key)) { cacheHits++; return solveCache.get(key); }
   const t0 = Date.now();
   const actions = rootActions(s);
@@ -82,8 +99,8 @@ async function solve(B, s, spec, seed) {
       nextInSpec: ni?.spec ?? null, nextInWarm: ni?.warm ?? null, start: [{ p: 1, state: s }] },
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;
-  const best = r.levers.reduce((bi, l, i) => (l.score > r.levers[bi].score ? i : bi), 0);
-  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy };
+  const { index: best, held } = chooseLever(r.levers, actions, { stayBias: STAY_BIAS });
+  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy, held };
   solveCache.set(key, out);
   return out;
 }
@@ -153,7 +170,7 @@ async function playBattle(i) {
     }
     return `bench: yours ${bench(B.team, st.youBench)} | theirs ${bench(B.oppTeam, st.oppBench)}${bits.length ? ` | ${bits.join("; ")}` : ""}`;
   };
-  const setLine = (m) => `${m.species} @ ${m.item} | ${m.ability} | ${m.nature} | HP ${m.stats.hp} Atk ${m.stats.atk} Def ${m.stats.def} SpA ${m.stats.spa} SpD ${m.stats.spd} Spe ${m.stats.spe} | ${m.moves.join(" / ")}`;
+  const setLine = (m) => `${m.species} (${m.genderDist.length === 1 ? m.genderDist[0].gender : "?"}) @ ${m.item} | ${m.ability} | ${m.nature} | HP ${m.stats.hp} Atk ${m.stats.atk} Def ${m.stats.def} SpA ${m.stats.spa} SpD ${m.stats.spd} Spe ${m.stats.spe} | ${m.moves.join(" / ")}`;
   trace(`\n=== battle ${n}: trainer ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}; IVs ${d.iv}) ===`);
   if (TRACE) { for (const m of B.oppTeam) trace(`  theirs: ${setLine(m)}`); for (const m of B.team) trace(`  yours:  ${setLine(m)}`); }
   for (; turn < TURN_CAP && !result; turn++) {
@@ -161,7 +178,7 @@ async function playBattle(i) {
     const before = where(s);
     if (T.aliveBench(s).length > 0) {
       const sv = await solve(B, s, specFor(d, n, s, seen), seedOf(SEED, "solve", n, turn));
-      action = sv.action; levers = sv.levers; stopBy = sv.stoppedBy;
+      action = sv.action; levers = sv.levers; stopBy = sv.stoppedBy + (sv.held ? "; switch not clearly better -> stay" : "");
       if (process.env.DUMP_LOW && sv.value < Number(process.env.DUMP_LOW)) fs.appendFileSync(TRACE + ".states", JSON.stringify({ n, turn: turn + 1, spec: specFor(d, n, s, seen), abilities: d.abilities, keys: d.keys, s }) + "\n");
       decisions++;
       if (action !== "stay") switches++;

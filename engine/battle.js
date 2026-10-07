@@ -47,6 +47,7 @@ export function view(B, s) {
     team: B.team, opp: B.oppTeam[s.oppActive], oppReserves: aliveOpp(s).length, oppSwitchHandled: true,
     ...(B.exactRoll ? { exactRoll: true } : {}), ...(B.rollOutcomeCap ? { rollOutcomeCap: B.rollOutcomeCap } : {}),
     ...(B.rollSample ? { rollSample: B.rollSample } : {}),
+    ...(B.labels ? { labels: true } : {}), // the engine's outcome text, for traces
     oppDrag: (st) => oppDragIn(B, st),
     oppBaton: (st) => oppBatonIn(B, st),
   };

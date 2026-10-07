@@ -98,7 +98,7 @@ export const aliveBench = (s) => s.youBench.map((e, i) => (e && e.hpPct > 0 ? i 
 // The engine context for a position: the active mon, and the team layer's
 // hooks -- how many healthy teammates each side has behind (Roar, Baton Pass)
 // and how to bring your replacement in when Roar drags your mon out.
-export function engineCtx(tctx, s, { noLabels = true } = {}) {
+export function engineCtx(tctx, s, { noLabels = !tctx.labels } = {}) {
   return {
     you: tctx.team[s.youActive], opp: tctx.opp, noLabels,
     // The damage roll: tctx.exactRoll enumerates the 16 rolls of every landed
