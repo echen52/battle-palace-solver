@@ -350,6 +350,11 @@ Choice item, d least HP lost, then score. --repl best = old rule. Battle
 Aerodactyl KOs before being hit 89.4% vs Latios 55.8% -- Latios picks Sub
 37%). Replay of the 20 losses with everything: 11/20 wins; 15 multi-
 candidate send-ins, 8 tied, 6 decided by the rule (5 by b, 1 by a).
+REORDERED (user, 478f754): a (KO before it acts, 5-pt band), then the trade
+dmg - 1.5 x HP lost - 0.2 x P(ends the turn in the Palace low-HP row,
+palace.js:117) within 5 pts ("HP is more valuable"), then no Choice item,
+then score. Of the 6 rule-decided picks above, 2 change: Metagross ->
+Swampert (vs Salamence), Salamence -> Suicune (vs Armaldo, the user's pick).
 
 ## Side finding
 
