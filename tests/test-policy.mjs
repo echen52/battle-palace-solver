@@ -137,6 +137,11 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   ok(Math.abs(aero.pKO - 0.894) < 0.005 && Math.abs(lat.pKO - 0.558) < 0.005, `KO before being hit: Aerodactyl ${aero.pKO.toFixed(3)} (0.894), Latios ${lat.pKO.toFixed(3)} (0.558)`);
   ok(aero.choice && !lat.choice && lat.lost > aero.lost, "Aerodactyl has the Choice Band; Latios loses more HP (Dragon Claw)");
   ok(aero.dmg > 0.3 && aero.dmg <= 69 / 170 + 1e-9, "damage dealt is capped at the HP it had");
+  // a slower candidate: Suicune (112) under Salamence (152) can KO this turn, but never before being hit
+  let s2 = Bt.battleStart(B, 1); s2 = { ...s2, yourHpPct: 0, oppHpPct: (12 / 170) * 100 };
+  const sui = P.firstTurnStats(B, s2, 2);
+  let pAnyKO = 0; { const B2 = { ...B, exactRoll: true }; const sIn = Bt.replaceYours(B2, s2, 2); for (const r of Bt.battleTurn(B2, sIn, "stay")) { const st = r.state; if ((st.oppActive === 0 ? st.oppHpPct : st.oppBench[0]?.hpPct ?? 0) <= 0) pAnyKO += r.p; } }
+  ok(pAnyKO > 0.2 && sui.pKO < 0.02, `slower: KO this turn ${pAnyKO.toFixed(3)} but before being hit ${sui.pKO.toFixed(3)}`);
 }
 
 console.log(`test-policy: ${pass}/${pass + fail}`);
