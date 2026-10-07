@@ -30,7 +30,7 @@ import { rootActions } from "../engine/solve.js";
 import { runSolve } from "../engine/solve-core.js";
 import { makeDraw, seedOf, challengeOf, stageOf, isSpenser, FIRST_LATE } from "./draw.mjs";
 import { genderOf, withGender } from "./gender.mjs";
-import { chooseLever, tiedWithBest, tieBreak, firstTurnStats } from "./policy.mjs";
+import { chooseLever, tiedWithBest, tieBreak, firstTurnStats, trade } from "./policy.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith("--") ? [...a, [x.slice(2), all[i + 1]]] : a), []));
 const TEAM_FILE = args.team, OUT = args.out;
@@ -222,7 +222,7 @@ async function playBattle(i) {
           const stats = tied.map((c) => ({ ...firstTurnStats(B, s, c), value: vals.find((x) => x.j === c).value }));
           const tb = tieBreak(stats);
           j = tb.j;
-          replVals.push(`still tied -> rule ${tb.step}: ` + stats.map((x) => `${B.team[x.j].species} KO-before-hit ${(100 * x.pKO).toFixed(1)}%, dmg ${(100 * x.dmg).toFixed(0)}%, lost ${(100 * x.lost).toFixed(0)}%${x.choice ? ", Choice" : ""}`).join("; "));
+          replVals.push(`still tied -> rule ${tb.step}: ` + stats.map((x) => `${B.team[x.j].species} KO-before-hit ${(100 * x.pKO).toFixed(1)}%, dmg ${(100 * x.dmg).toFixed(0)}% - 1.5 x lost ${(100 * x.lost).toFixed(0)}% - 0.2 x low-HP ${(100 * x.pLow).toFixed(0)}% = ${(100 * trade(x)).toFixed(1)}${x.choice ? ", Choice" : ""}`).join("; "));
         }
         decisions++;
       }

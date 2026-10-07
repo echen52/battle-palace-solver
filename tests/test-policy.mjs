@@ -106,21 +106,27 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   ok(P.tiedWithBest([{ j: 1, value: 0.55, margin: 0.002 }, { j: 2, value: 0.536, margin: 0.005 }]).join() === "1", "battle 211's numbers: Aerodactyl clearly better, not tied");
   ok(P.tiedWithBest([{ j: 1, value: 0.55, margin: 0.01 }, { j: 2, value: 0.536, margin: 0.005 }]).join() === "1,2", "overlapping ranges are tied");
   ok(P.tiedWithBest([{ j: 2, value: 0.4, margin: 0.1 }, { j: 1, value: 0.6, margin: 0.05 }]).join() === "1", "the best is found wherever it sits");
-  const S = (j, pKO, dmg, lost, choice, value = 0.5) => ({ j, pKO, dmg, lost, choice, value });
-  let r = P.tieBreak([S(1, 0.865, 0.4, 0.04, true), S(2, 0.558, 0.3, 0.12, false)]);
-  ok(r.j === 1 && r.step === "a", "a: the higher chance to KO before being hit (86.5% vs 55.8%), Choice or not");
-  r = P.tieBreak([S(1, 0.80, 0.4, 0.04, true), S(2, 0.77, 0.3, 0.12, false)]);
-  ok(r.j === 2 && r.step === "c", "within 5 points on a: the mon without a Choice item");
-  r = P.tieBreak([S(1, 0.80, 0.4, 0.04, false), S(2, 0.77, 0.3, 0.12, false)]);
-  ok(r.j === 1 && r.step === "d", "within 5 points, no Choice item: the least HP lost");
-  r = P.tieBreak([S(1, 0, 0.30, 0.1, false), S(2, 0.01, 0.50, 0.2, false)]);
-  ok(r.j === 2 && r.step === "b", "b: neither can KO -> more damage dealt");
-  r = P.tieBreak([S(1, 0, 0.30, 0.1, true), S(2, 0, 0.33, 0.2, false)]);
-  ok(r.j === 2 && r.step === "c", "b within 5 points -> c");
+  const S = (j, pKO, dmg, lost, choice, value = 0.5, pLow = 0) => ({ j, pKO, dmg, lost, pLow, choice, value });
+  ok(Math.abs(P.trade({ dmg: 0.46, lost: 0.30, pLow: 0.5 }) - (0.46 - 0.45 - 0.1)) < 1e-12, "trade = dmg - 1.5 x lost - 0.2 x P(low-HP row)");
+  let r = P.tieBreak([S(1, 0.894, 0.4, 0.04, true), S(2, 0.558, 0.3, 0.12, false)]);
+  ok(r.j === 1 && r.step === "a", "a: the higher chance to KO before being hit (89.4% vs 55.8%), Choice or not");
+  // the Armaldo case (user): Salamence dmg 46% lost 30% vs Suicune dmg 20% lost 12% -> Suicune
+  r = P.tieBreak([S(1, 0, 0.46, 0.30, true, 0.592), S(2, 0, 0.20, 0.12, false, 0.616)]);
+  ok(r.j === 2, `the Armaldo case goes to Suicune (rule ${r.step})`);
+  r = P.tieBreak([S(1, 0, 0.46, 0.30, false), S(2, 0, 0.20, 0.05, false)]);
+  ok(r.j === 2 && r.step === "b", "b: HP lost outweighs damage (0.46 - 0.45 = 0.01 < 0.20 - 0.075 = 0.125)");
+  r = P.tieBreak([S(1, 0, 0.70, 0.20, false), S(2, 0, 0.20, 0.05, false)]);
+  ok(r.j === 1 && r.step === "b", "b: enough extra damage still wins (0.70 - 0.30 = 0.40 vs 0.125)");
+  r = P.tieBreak([S(1, 0, 0.60, 0.10, false), S(2, 0, 0.20, 0.10, false)]);
+  ok(r.j === 1 && r.step === "b", "b: equal HP lost -> more damage");
+  r = P.tieBreak([S(1, 0, 0.30, 0.10, false, 0.5, 0.9), S(2, 0, 0.30, 0.10, false, 0.5, 0)]);
+  ok(r.j === 2 && r.step === "b", "b: dropping into the low-HP row costs (0.2 x 0.9 > band)");
+  r = P.tieBreak([S(1, 0.80, 0.4, 0.10, true), S(2, 0.77, 0.4, 0.12, false)]);
+  ok(r.j === 2 && r.step === "c", "a and b within 5 points: the mon without a Choice item");
+  r = P.tieBreak([S(1, 0.80, 0.9, 0.10, true), S(2, 0.77, 0.3, 0.12, false)]);
+  ok(r.j === 1 && r.step === "b", "b before c: a much better trade beats the Choice preference");
   r = P.tieBreak([S(1, 0.5, 0.3, 0.1, false, 0.6), S(2, 0.5, 0.3, 0.1, false, 0.7)]);
   ok(r.j === 2 && r.step === "score", "all equal: the solver score");
-  r = P.tieBreak([S(1, 0.5, 0.3, 0.2, false), S(2, 0.5, 0.9, 0.1, false)]);
-  ok(r.j === 2 && r.step === "d", "b is skipped when a KO is possible (dmg not used)");
   // the first turn, exactly: battle 211's position (Suicune fainted, Salamence at 69/170)
   const fs = await import("node:fs");
   const { buildTeam } = await import(U("engine/showdown.js"));
@@ -136,6 +142,7 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   // (no Intimidate: Salamence is already in -- a battle START would give Aerodactyl -1 Atk and 0.865)
   ok(Math.abs(aero.pKO - 0.894) < 0.005 && Math.abs(lat.pKO - 0.558) < 0.005, `KO before being hit: Aerodactyl ${aero.pKO.toFixed(3)} (0.894), Latios ${lat.pKO.toFixed(3)} (0.558)`);
   ok(aero.choice && !lat.choice && lat.lost > aero.lost, "Aerodactyl has the Choice Band; Latios loses more HP (Dragon Claw)");
+  ok(aero.pLow >= 0 && aero.pLow <= 1 && lat.pLow >= 0, "low-HP chances are probabilities");
   ok(aero.dmg > 0.3 && aero.dmg <= 69 / 170 + 1e-9, "damage dealt is capped at the HP it had");
   // a slower candidate: Suicune (112) under Salamence (152) can KO this turn, but never before being hit
   let s2 = Bt.battleStart(B, 1); s2 = { ...s2, yourHpPct: 0, oppHpPct: (12 / 170) * 100 };
