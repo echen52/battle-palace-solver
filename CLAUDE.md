@@ -299,6 +299,20 @@ faintedLocked = the CB user fainted (always locked after its first move):
 ~0.2 per battle for the top four, ~0.6 for the three Normal types.
 cb-report's sign test overflowed past n = 1023 (NaN) -- now in logs.
 
+SOLVER ON FINALISTS (user, 2026-10-06; first block 250 battles, seed 1,
+budget 2 s; results/solver-cb, gitignored; run.sh / watch.sh there). Team 4
+(Salamence + Latios + Suicune) dropped by the user for the original
+Metagross + Latios + Swampert. Wins / 250 (screen type-policy wins on the
+same battles): Salamence + Suicune + Snorlax 247 (239); Aerodactyl + Latios
++ Suicune 246 (243); Metagross + Latios + Suicune 244 (243); Metagross +
+Latios + Swampert 243 (233). 0 errors. All pairs n.s. (discordant 3-7 a
+side, p >= 0.34). The solver helps the Swampert team most (+10) -- the
+screen's type rule handicaps it; solver and screen lose mostly DIFFERENT
+battles. ~40 s a battle machine-wide; Salamence + Snorlax slowest (stalls,
+one 54-min battle). teams/mlsuicune.txt has Lum on both Latios and Suicune
+-- not enterable (frontier_util.c AppendIfValid, 1994-2000 rejects a
+repeated held item); the runs use Suicune Leftovers.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the

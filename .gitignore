@@ -2,3 +2,4 @@ results/pilot*
 results/*.jsonl
 results/*.log
 results/screen/
+results/solver-cb/
