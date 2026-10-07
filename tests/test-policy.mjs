@@ -142,7 +142,7 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   // (no Intimidate: Salamence is already in -- a battle START would give Aerodactyl -1 Atk and 0.865)
   ok(Math.abs(aero.pKO - 0.894) < 0.005 && Math.abs(lat.pKO - 0.558) < 0.005, `KO before being hit: Aerodactyl ${aero.pKO.toFixed(3)} (0.894), Latios ${lat.pKO.toFixed(3)} (0.558)`);
   ok(aero.choice && !lat.choice && lat.lost > aero.lost, "Aerodactyl has the Choice Band; Latios loses more HP (Dragon Claw)");
-  ok(aero.pLow >= 0 && aero.pLow <= 1 && lat.pLow >= 0, "low-HP chances are probabilities");
+  ok(aero.pLow > 0.03 && aero.pLow < 0.05 && lat.pLow > 0.025 && lat.pLow < 0.045, `the chance to end the turn in the low-HP row: Aerodactyl ${aero.pLow.toFixed(3)}, Latios ${lat.pLow.toFixed(3)} (each ~0.03-0.04)`);
   ok(aero.dmg > 0.3 && aero.dmg <= 69 / 170 + 1e-9, "damage dealt is capped at the HP it had");
   // a slower candidate: Suicune (112) under Salamence (152) can KO this turn, but never before being hit
   let s2 = Bt.battleStart(B, 1); s2 = { ...s2, yourHpPct: 0, oppHpPct: (12 / 170) * 100 };
