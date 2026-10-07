@@ -324,6 +324,23 @@ to Metagross 0.541 vs stay 0.540). Its loss: Latios left in on Slaking's
 ACTING turn (stay 0.638 vs Metagross 0.531) and Hyper Beamed -- the same
 pattern as streak battle 441 (open note (b)). Not shown in traces: crits
 and misses (no label; read off the HP change).
+USER REVIEW OF THE LOSS LOGS (2026-10-07) -> fixes A, B, D (fc64bc3 + tests):
+A sim/policy.mjs chooseLever: stay unless the best switch beats stay by both
+  95% margins (--stay-bias off = old rule). B sim/gender.mjs: genders fixed
+  once per battle (engine split EVERY Attract use by gender odds,
+  logic.js:10303-10313; also engine/gender-data.js rounds PERCENT_FEMALE and
+  divides by 255 -- Machamp 25.1% vs the game's 63/256 = 24.6%; engine table
+  NOT changed); opponent's from the battle seed + ability-bit parity, yours
+  from (M)/(F) or drawn; solver told both; cache keyed on them. D tctx.labels
+  (trace only): crit, asleep/frozen/paralyzed. Also confirmed for the user:
+  Palace opponents DO switch (AI_TrySwitchOrUseItem, battle_controller_
+  opponent.c:1540; Slowking->Lapras = FindMonThatAbsorbsOpponentsMove);
+  Focus Punch loses focus when hit first (logic.js:8580); the "Choice Band
+  used" trace text was a label bug (usedHeldItems is per slot).
+REPLAY of the 20 losses: A+B+D 10 wins / 20; control (B+D, old rule) 4 / 20
+(same battles, same load) -> 6 battles turned by A. Switches 19 vs 39.
+Biased sample (losses only): the paired 250-battle block is the real test.
+Logs: results/solver-cb/loss-logs-v2/.
 
 ## Side finding
 
