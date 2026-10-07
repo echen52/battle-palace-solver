@@ -99,5 +99,45 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   ok(para.some((r) => /You is fully paralyzed/.test(r.label)), "a paralysed mon's label says fully paralyzed");
 }
 
+// ── the replacement after a faint ──────────────────────────────────────────
+{
+  const P = await import(U("sim/policy.mjs"));
+  // clearly better -> alone; overlapping -> tied
+  ok(P.tiedWithBest([{ j: 1, value: 0.55, margin: 0.002 }, { j: 2, value: 0.536, margin: 0.005 }]).join() === "1", "battle 211's numbers: Aerodactyl clearly better, not tied");
+  ok(P.tiedWithBest([{ j: 1, value: 0.55, margin: 0.01 }, { j: 2, value: 0.536, margin: 0.005 }]).join() === "1,2", "overlapping ranges are tied");
+  ok(P.tiedWithBest([{ j: 2, value: 0.4, margin: 0.1 }, { j: 1, value: 0.6, margin: 0.05 }]).join() === "1", "the best is found wherever it sits");
+  const S = (j, pKO, dmg, lost, choice, value = 0.5) => ({ j, pKO, dmg, lost, choice, value });
+  let r = P.tieBreak([S(1, 0.865, 0.4, 0.04, true), S(2, 0.558, 0.3, 0.12, false)]);
+  ok(r.j === 1 && r.step === "a", "a: the higher chance to KO before being hit (86.5% vs 55.8%), Choice or not");
+  r = P.tieBreak([S(1, 0.80, 0.4, 0.04, true), S(2, 0.77, 0.3, 0.12, false)]);
+  ok(r.j === 2 && r.step === "c", "within 5 points on a: the mon without a Choice item");
+  r = P.tieBreak([S(1, 0.80, 0.4, 0.04, false), S(2, 0.77, 0.3, 0.12, false)]);
+  ok(r.j === 1 && r.step === "d", "within 5 points, no Choice item: the least HP lost");
+  r = P.tieBreak([S(1, 0, 0.30, 0.1, false), S(2, 0.01, 0.50, 0.2, false)]);
+  ok(r.j === 2 && r.step === "b", "b: neither can KO -> more damage dealt");
+  r = P.tieBreak([S(1, 0, 0.30, 0.1, true), S(2, 0, 0.33, 0.2, false)]);
+  ok(r.j === 2 && r.step === "c", "b within 5 points -> c");
+  r = P.tieBreak([S(1, 0.5, 0.3, 0.1, false, 0.6), S(2, 0.5, 0.3, 0.1, false, 0.7)]);
+  ok(r.j === 2 && r.step === "score", "all equal: the solver score");
+  r = P.tieBreak([S(1, 0.5, 0.3, 0.2, false), S(2, 0.5, 0.9, 0.1, false)]);
+  ok(r.j === 2 && r.step === "d", "b is skipped when a KO is possible (dmg not used)");
+  // the first turn, exactly: battle 211's position (Suicune fainted, Salamence at 69/170)
+  const fs = await import("node:fs");
+  const { buildTeam } = await import(U("engine/showdown.js"));
+  const { getOpponentConfig } = await import(U("engine/opponent-adapter.js"));
+  const Bt = await import(U("engine/battle.js"));
+  const N = await import(U("engine/next-in.js"));
+  const team = buildTeam(fs.readFileSync(path.join(here, "../teams/cb/test-aero-team.txt"), "utf8"));
+  const keys = ["Salamence 8", "Kingdra 4", "Steelix 4"], abil = ["Intimidate", "Swift Swim", "Rock Head"];
+  const B = { team, oppTeam: keys.map((k, i) => L.buildFrontierOpponent(getOpponentConfig(k, { ability: abil[i], ivTier: 31, allowUnreachableTier: true }))), oppIds: keys.map(N.setId) };
+  let s = Bt.battleStart(B, 2);
+  s = { ...s, yourHpPct: 0, oppHpPct: (69 / 170) * 100 };
+  const aero = P.firstTurnStats(B, s, 0), lat = P.firstTurnStats(B, s, 1);
+  // (no Intimidate: Salamence is already in -- a battle START would give Aerodactyl -1 Atk and 0.865)
+  ok(Math.abs(aero.pKO - 0.894) < 0.005 && Math.abs(lat.pKO - 0.558) < 0.005, `KO before being hit: Aerodactyl ${aero.pKO.toFixed(3)} (0.894), Latios ${lat.pKO.toFixed(3)} (0.558)`);
+  ok(aero.choice && !lat.choice && lat.lost > aero.lost, "Aerodactyl has the Choice Band; Latios loses more HP (Dragon Claw)");
+  ok(aero.dmg > 0.3 && aero.dmg <= 69 / 170 + 1e-9, "damage dealt is capped at the HP it had");
+}
+
 console.log(`test-policy: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);

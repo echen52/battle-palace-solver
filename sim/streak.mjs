@@ -30,7 +30,7 @@ import { rootActions } from "../engine/solve.js";
 import { runSolve } from "../engine/solve-core.js";
 import { makeDraw, seedOf, challengeOf, stageOf, isSpenser, FIRST_LATE } from "./draw.mjs";
 import { genderOf, withGender } from "./gender.mjs";
-import { chooseLever } from "./policy.mjs";
+import { chooseLever, tiedWithBest, tieBreak, firstTurnStats } from "./policy.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith("--") ? [...a, [x.slice(2), all[i + 1]]] : a), []));
 const TEAM_FILE = args.team, OUT = args.out;
@@ -39,6 +39,9 @@ const BUDGET = Number(args.budget ?? 3000), WORKERS = Number(args.workers ?? Mat
 const TURN_CAP = 400;
 // --stay-bias off: the old rule (highest average score, ties included)
 const STAY_BIAS = args["stay-bias"] !== "off";
+// after a faint: "tiebreak" (default; sim/policy.mjs) or "best" (the old
+// highest-score rule); --repl-extra ms: the re-solve's extra time (2000)
+const REPL_POLICY = args.repl ?? "tiebreak", REPL_EXTRA = Number(args["repl-extra"] ?? 2000);
 // --only 63,84 / --only spenser: play just those battle numbers (n);
 // --trace <file>: write each turn (both mons, HP, the levers' scores, what
 // happened) as text.
@@ -86,21 +89,21 @@ function nextInFor(spec) {
 }
 const solveCache = new Map();
 let solves = 0, solveMs = 0, cacheHits = 0, exactMsSum = 0; const stopped = {};
-async function solve(B, s, spec, seed) {
+async function solve(B, s, spec, seed, { budget = BUDGET, fresh = false } = {}) {
   const ni = spec ? nextInFor(spec) : null;
   // genders vary by battle (sim/gender.mjs), so they are part of the position
   const key = JSON.stringify([s, ni?.spec ?? null, B.team.map((m) => m.genderDist[0].gender), B.oppTeam[s.oppActive].genderDist[0].gender]);
-  if (solveCache.has(key)) { cacheHits++; return solveCache.get(key); }
+  if (!fresh && solveCache.has(key)) { cacheHits++; return solveCache.get(key); }
   const t0 = Date.now();
   const actions = rootActions(s);
   const r = await runSolve({
-    pool, actions, budgetMs: BUDGET, seed,
+    pool, actions, budgetMs: budget, seed,
     init: { team: B.team, opp: B.oppTeam[s.oppActive], oppReserves: Bt.aliveOpp(s).length, exactRoll: true,
       nextInSpec: ni?.spec ?? null, nextInWarm: ni?.warm ?? null, start: [{ p: 1, state: s }] },
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;
   const { index: best, held } = chooseLever(r.levers, actions, { stayBias: STAY_BIAS });
-  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy, held };
+  const out = { action: actions[best], value: r.levers[best].score, margin: r.levers[best].margin ?? 0, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy, held };
   solveCache.set(key, out);
   return out;
 }
@@ -191,18 +194,40 @@ async function playBattle(i) {
       const cands = T.aliveBench(s);
       let j = cands[0], replVals = null;
       if (cands.length > 1) {
-        let bestV = -Infinity;
-        replVals = [];
+        // Each candidate solved; a clearly better one goes in. Otherwise the
+        // tied ones are re-solved with REPL_EXTRA more time, and if still tied
+        // the first turn decides (sim/policy.mjs tieBreak).
+        const specOf = (sc) => specFor(d, n, sc, seen.includes(sc.oppActive) ? seen : [...seen, sc.oppActive]);
+        const vals = [];
         for (const c of cands) {
           const sc = Bt.replaceYours(B, s, c);
-          const v = (await solve(B, sc, specFor(d, n, sc, seen.includes(sc.oppActive) ? seen : [...seen, sc.oppActive]), seedOf(SEED, "repl", n, turn, c))).value;
-          replVals.push(`${B.team[c].species} ${v.toFixed(3)}`);
-          if (v > bestV) { bestV = v; j = c; }
+          const sv = await solve(B, sc, specOf(sc), seedOf(SEED, "repl", n, turn, c));
+          vals.push({ j: c, value: sv.value, margin: sv.margin });
+        }
+        const fmt = (xs) => xs.map((x) => `${B.team[x.j].species} ${x.value.toFixed(3)}±${x.margin.toFixed(3)}`).join(", ");
+        replVals = [fmt(vals)];
+        let tied = tiedWithBest(vals);
+        if (tied.length > 1 && REPL_POLICY === "tiebreak") {
+          for (const c of tied) {
+            const sc = Bt.replaceYours(B, s, c);
+            const sv = await solve(B, sc, specOf(sc), seedOf(SEED, "repl2", n, turn, c), { budget: BUDGET + REPL_EXTRA, fresh: true });
+            Object.assign(vals.find((x) => x.j === c), { value: sv.value, margin: sv.margin });
+          }
+          replVals.push(`tied, re-solved: ${fmt(vals.filter((x) => tied.includes(x.j)))}`);
+          tied = tiedWithBest(vals.filter((x) => tied.includes(x.j)));
+        }
+        if (REPL_POLICY !== "tiebreak") j = vals.reduce((a, x) => (x.value > a.value ? x : a)).j;
+        else if (tied.length === 1) j = tied[0];
+        else {
+          const stats = tied.map((c) => ({ ...firstTurnStats(B, s, c), value: vals.find((x) => x.j === c).value }));
+          const tb = tieBreak(stats);
+          j = tb.j;
+          replVals.push(`still tied -> rule ${tb.step}: ` + stats.map((x) => `${B.team[x.j].species} KO-before-hit ${(100 * x.pKO).toFixed(1)}%, dmg ${(100 * x.dmg).toFixed(0)}%, lost ${(100 * x.lost).toFixed(0)}%${x.choice ? ", Choice" : ""}`).join("; "));
         }
         decisions++;
       }
       s = Bt.replaceYours(B, s, j); note();
-      trace(`    fainted -> send in ${B.team[j].species}${replVals ? ` [${replVals.join(", ")}]` : ""}; now ${where(s)}\n    ${field(s)}`);
+      trace(`    fainted -> send in ${B.team[j].species}${replVals ? ` [${replVals.join(" | ")}]` : ""}; now ${where(s)}\n    ${field(s)}`);
     } else if (r.outcome) {
       result = r.outcome;
     }
