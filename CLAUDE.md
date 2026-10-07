@@ -355,6 +355,18 @@ dmg - 1.5 x HP lost - 0.2 x P(ends the turn in the Palace low-HP row,
 palace.js:117) within 5 pts ("HP is more valuable"), then no Choice item,
 then score. Of the 6 rule-decided picks above, 2 change: Metagross ->
 Swampert (vs Salamence), Salamence -> Suicune (vs Armaldo, the user's pick).
+PAGE UPDATED (user asked, b55232f; not pushed yet): engine/policy.js = the
+shared rules (sim/policy.mjs re-exports). (1) the recommendation (star +
+verdict) is chooseLever: stay unless a switch is clearly better ("switching
+isn't clearly better (X leads by less than the noise)"); the table still
+sorts by score. (2) opponent Gender picker (only for two-gender species;
+cleared on a new set), your mons' gender on their cards from (M)/(F), a note
+when Attract / Cute Charm is in play and a needed gender is unknown. (3)
+"Just fainted: who goes in?" (#youFainted): buildSendIn (fresh entry; the
+newcomer's Intimidate added on top of the entered opp stages via
+form.entering) + decideSendIn (each solved with budget/n, tied re-solved,
+then firstTurnStatsTeam vs the mon in front -> tieBreak). test-ui-logic 67,
+test-site-browser 31; 7/7 mutations caught.
 
 ## Side finding
 
