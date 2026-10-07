@@ -53,10 +53,14 @@ export function genderThreshold(species) {
 export function genderOf(seed, n, side, slot, species, abilityBit = null) {
   const t = genderThreshold(species);
   if (typeof t === "string") return t;
-  const u = rng(seedOf(seed, "gender", side, n, slot))();
-  const low = abilityBit == null ? Math.floor(u * 256) : abilityBit + 2 * Math.floor(u * 128);
-  return t > low ? "female" : "male";
+  return genderFromLow(t, lowByte(rng(seedOf(seed, "gender", side, n, slot))(), abilityBit));
 }
+// The personality's low byte from a [0,1) draw: uniform, or with bit 0 fixed
+// to the ability bit.
+export const lowByte = (u, abilityBit = null) => (abilityBit == null ? Math.floor(u * 256) : abilityBit + 2 * Math.floor(u * 128));
+// GetGenderFromSpeciesAndPersonality (src/pokemon.c:3481): female iff
+// genderRatio > low byte.
+export const genderFromLow = (threshold, low) => (threshold > low ? "female" : "male");
 
 // A built mon with its gender fixed (the engine reads genderDist).
 export const withGender = (mon, gender) => ({ ...mon, genderDist: [{ p: 1, gender }] });

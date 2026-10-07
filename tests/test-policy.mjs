@@ -60,6 +60,9 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL", m); } }
   ok(Math.abs(f / N - 63 / 256) < 0.01, `drawn rate ${(f / N).toFixed(4)} ~ 63/256`);
   f = 0; for (let n = 0; n < N; n++) if (G.genderOf(7, n, "opp", 2, "Machamp", 1) === "female") f++;
   ok(Math.abs(f / N - 31 / 128) < 0.01, "with ability bit 1 ~ 31/128");
+  ok(G.genderFromLow(63, 62) === "female" && G.genderFromLow(63, 63) === "male" && G.genderFromLow(127, 0) === "female", "female iff threshold > low byte (pokemon.c:3481)");
+  let parity = true; for (let k = 0; k < 1000; k++) { const u = k / 1000; parity &&= G.lowByte(u, 0) % 2 === 0 && G.lowByte(u, 1) % 2 === 1 && G.lowByte(u, 1) < 256; }
+  ok(parity && G.lowByte(0.999999) === 255 && G.lowByte(0) === 0, "the ability bit fixes the low byte's parity; else 0..255");
   ok(G.genderOf(3, 99, "opp", 1, "Gardevoir") === G.genderOf(3, 99, "opp", 1, "Gardevoir"), "the same battle, the same gender");
   ok(G.genderOf(3, 99, "opp", 1, "Latios") === "male", "a fixed-gender species ignores the draw");
   const m = L.buildMon({ species: "Machamp", level: 50, nature: "Adamant", moves: ["Attract"], ability: "Guts", item: null, ivs: {}, evs: {}, friendship: 255 });
