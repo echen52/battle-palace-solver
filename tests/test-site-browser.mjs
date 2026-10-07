@@ -143,6 +143,32 @@ try {
   await page.selectOption("#battle", "6"); await page.waitForTimeout(400);
   ok(await page.inputValue("#brain") === "" && await page.inputValue("#oppSet") === "" && await page.locator("#bracketRow").isVisible(), "battle 6: Brain off, his set cleared");
 
+  // 2026-10-07: gender -- your mons' from the paste (Latios is always male),
+  // the opponent's picker shown only for a two-gender species, and the
+  // Attract note until it is set.
+  ok((await page.textContent(".mon-card:nth-child(2) .mc-meta")).includes("♂"), "Latios's card shows ♂");
+  await page.selectOption("#challenge", "8"); await page.selectOption("#battle", "1"); await page.waitForTimeout(300);
+  await page.click("#oppSet"); await page.keyboard.type("machamp 7"); await page.keyboard.press("Enter"); await page.waitForTimeout(400);
+  ok(await page.locator("#oppGenderRow").isVisible() && /Attract .*their Machamp/.test(await page.textContent("#notes")), "Machamp 7 (Attract): gender picker shown, note while unknown");
+  await page.selectOption("#oppGender", "female"); await page.waitForTimeout(400);
+  ok(!/Attract/.test(await page.textContent("#notes")), "gender set: the note goes");
+  await page.click("#oppSet"); await page.keyboard.type("latios 1"); await page.keyboard.press("Enter"); await page.waitForTimeout(400);
+  ok(await page.locator("#oppGenderRow").isHidden() && await page.inputValue("#oppGender") === "", "Latios 1: no picker (one gender); the old choice is cleared");
+
+  // Send-in mode: your mon out fainted -> each teammate solved, one sent in.
+  await page.click("#oppSet"); await page.keyboard.type("salamence 1"); await page.keyboard.press("Enter"); await page.waitForTimeout(300);
+  await page.check("#youFainted"); await page.waitForTimeout(400);
+  ok(/Send-in mode: .*Latios and Swampert/.test(await page.textContent("#notes")), "send-in mode lists the two teammates");
+  await page.selectOption("#budget", "10000");
+  await page.click("#solveBtn");
+  await page.waitForFunction(() => /^Send in /.test(document.getElementById("verdict").textContent) && !document.getElementById("solveBtn").disabled, null, { timeout: 120000 });
+  const sRows = await page.$$eval("#optionsTable tbody tr", (trs) => trs.map((tr) => tr.children[0].textContent.trim()));
+  const sVerdict = await page.textContent("#verdict");
+  ok(sRows.length === 2 && sRows.some((r) => r.includes("Send in Latios")) && sRows.some((r) => r.includes("Send in Swampert")) && sRows.filter((r) => r.startsWith("★")).length === 1
+    && sVerdict.includes(sRows.find((r) => r.startsWith("★")).replace("★ Send in ", "").split(" ")[0]), `two rows, one starred, the verdict names it ("${sVerdict}"; ${sRows.join(" | ")})`);
+  ok(errors.length === 0, `send-in ran with no error (${errors.join("; ")})`);
+  await page.uncheck("#youFainted");
+
   // A saved team survives a reload.
   await page.fill("#teamName", "test team");
   await page.click("#saveTeam");

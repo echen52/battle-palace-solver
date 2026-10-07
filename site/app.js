@@ -2,7 +2,7 @@
 // The page's DOM wiring. All battle logic is in ui-logic.js (pure) and the
 // engine; the solve runs in Web Workers (solver.js).
 
-import { parseTeam, setChoices, setLabel, ivTierOdds, buildOpponent, buildFight, turnChoices, resultRows, verdict, pct, STAGE_KEYS, brainFor } from "./ui-logic.js";
+import { parseTeam, setChoices, setLabel, ivTierOdds, buildOpponent, buildFight, turnChoices, resultRows, verdict, pct, STAGE_KEYS, brainFor, genderOf, buildSendIn, decideSendIn } from "./ui-logic.js";
 import { solveInBrowser } from "./solver.js";
 import { FRONTIER_POOL } from "../engine/frontier-pool.js";
 import { palaceMoveGroup, GROUP_NAMES } from "../engine/palace.js";
@@ -49,6 +49,9 @@ function sideRows(el, side) {
     <div class="field-row"><label for="${side}-spikes">Spikes</label><select class="trigger" id="${side}-spikes">${[0, 1, 2, 3].map((n) => opt(n, n ? `${n} layer${n > 1 ? "s" : ""}` : "None")).join("")}</select></div>`;
 }
 
+const GENDER_MARK = { male: "♂", female: "♀", genderless: "no gender" };
+const genderMark = (mon) => { const g = genderOf(mon); return g ? GENDER_MARK[g] : '<span title="Can be either: add (M) or (F) after the name in the paste. Only Attract and Cute Charm read it.">♂/♀?</span>'; };
+
 // ── your team ──────────────────────────────────────────────────────────────
 function loadSaved() { try { return JSON.parse(localStorage.getItem(STORE) || "{}"); } catch { return {}; } }
 function storeSaved(m) { try { localStorage.setItem(STORE, JSON.stringify(m)); } catch { /* private mode: not kept */ } }
@@ -77,7 +80,7 @@ function renderTeam() {
       <div class="mc-head">
         <input type="radio" name="outMon" class="out-radio" id="out-${i}" value="${i}"${i === active ? " checked" : ""} />
         <label for="out-${i}" class="mc-name">${c.species}</label>
-        <span class="mc-meta">${c.item ?? "no item"} · ${c.nature}</span>
+        <span class="mc-meta">${c.item ?? "no item"} · ${c.nature} · ${genderMark(buildPlayerMon(c))}</span>
       </div>
       <div class="field-row"><label for="m${i}-hp">HP %</label><input type="number" class="trigger" id="m${i}-hp" min="0" max="100" value="${monState[i].hpPct}" /><span class="hp-abs" id="m${i}-hpAbs"></span></div>
       ${statusRows(`m${i}`)}
@@ -178,6 +181,7 @@ function renderOppSet() {
   const key = keyOf($("oppSet").value);
   const e = key ? FRONTIER_POOL[key] : null;
   $("oppCard").hidden = !e; $("oppAbilityRow").hidden = !e || e.abilities.length < 2; $("oppIvRow").hidden = !e;
+  $("oppGenderRow").hidden = !e || !!genderOf(buildOpponent({ setKey: key, ability: e.abilities[0], ivTier: 31 }));
   if (!e) return;
   $("oppCard").innerHTML = `<div class="sc-title">${setLabel(key)}</div>
     <div class="sc-meta"><b>${e.item ?? "no item"}</b> · <b>${e.nature}</b> · ${e.abilities.join(" / ")}</div>
@@ -204,7 +208,7 @@ function readForm() {
   return {
     team: teamCfgs, active, mons: readMons(),
     you: { stages: readStages("ys"), confused: Number($("youConfused").value), subPct: Number($("youSub").value) || 0, lowHp: tri($("youLowHp").value) },
-    opp: { setKey: oppKey, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31,
+    opp: { setKey: oppKey, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31, gender: $("oppGender").value || null,
       hpPct: Math.max(1, Math.min(100, Number($("oppHp").value) || 100)),
       status: $("o-status").value, toxicTurns: Number($("o-toxic").value),
       sleep: { rest: $("o-sleepFrom").value === "rest", slept: Number($("o-slept").value) },
@@ -227,8 +231,15 @@ function refresh() {
   try {
     const key = keyOf($("oppSet").value);
     if (key) {
-      const o = buildOpponent({ setKey: key, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31 });
+      const o = buildOpponent({ setKey: key, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31, gender: $("oppGender").value || null });
       $("oppHpAbs").textContent = `${Math.round(((Number($("oppHp").value) || 100) / 100) * o.stats.hp)}/${o.stats.hp}`;
+    }
+    if ($("youFainted").checked) {
+      const c = buildSendIn(readForm());
+      fight = null;
+      $("youChoices").innerHTML = ""; $("oppChoices").innerHTML = "";
+      $("notes").textContent = `Send-in mode: Solve compares sending in ${c.map((x) => x.species).join(" and ")} (the time limit is shared).`;
+      return;
     }
     fight = buildFight(readForm());
     const ch = turnChoices(fight.tctx, fight.start);
@@ -245,20 +256,57 @@ function refresh() {
 
 // ── solving ────────────────────────────────────────────────────────────────
 function renderResults(levers, info) {
-  const rows = resultRows(levers, fight.labels);
+  const rows = resultRows(levers, fight.labels, fight.actions);
   const v = verdict(rows, info);
   $("verdict").textContent = v;
-  $("verdict").classList.toggle("tie", rows.some((r) => r.tie));
-  $("optionsTable").querySelector("tbody").innerHTML = rows.map((r) => `<tr class="${r.best ? "best" : r.tie ? "tie" : ""}">
-    <td>${r.best ? "★ " : ""}${r.label}${r.exactFirstTurn ? "" : ' <span class="pm" title="A move that hits 3-5 times, or too many damage rolls: this turn was played out by the playouts too.">*</span>'}</td>
+  $("verdict").classList.toggle("tie", rows.some((r) => r.tie) && !rows.find((r) => r.pick)?.stay);
+  $("optionsTable").querySelector("tbody").innerHTML = rows.map((r) => `<tr class="${r.pick ? "best" : r.tie ? "tie" : ""}">
+    <td>${r.pick ? "★ " : ""}${r.label}${r.exactFirstTurn ? "" : ' <span class="pm" title="A move that hits 3-5 times, or too many damage rolls: this turn was played out by the playouts too.">*</span>'}</td>
     <td>${r.score.toFixed(3)} <span class="pm">±${Number.isFinite(r.margin) ? r.margin.toFixed(3) : "?"}</span></td>
     <td>${pct(r.pKO)}</td><td>${pct(r.pOppLeft)}</td><td>${pct(r.pLose, 1)}</td><td>${r.turns.toFixed(1)}</td></tr>`).join("");
   const n = rows.reduce((a, r) => a + r.rollouts, 0);
   const why = { separated: "one choice is clearly best", budget: "time limit reached", stopped: "stopped", exact: "solved exactly" }[info.stoppedBy];
   $("progress").textContent = info.done ? `${n.toLocaleString()} playouts · ${why ?? ""}` : `${n.toLocaleString()} playouts · ${(info.ms / 1000).toFixed(1)} s…`;
 }
+// Send-in mode: each teammate's position solved in turn (ui-logic decideSendIn).
+const RESULT_ROW = (label, r, mark) => `<tr class="${mark ? "best" : ""}"><td>${mark ? "★ " : ""}${label}</td>
+    <td>${r.score.toFixed(3)} <span class="pm">±${Number.isFinite(r.margin) ? r.margin.toFixed(3) : "?"}</span></td>
+    <td>${pct(r.pKO)}</td><td>${pct(r.pOppLeft)}</td><td>${pct(r.pLose, 1)}</td><td>${r.turns.toFixed(1)}</td></tr>`;
+async function solveSendIn() {
+  const cands = buildSendIn(readForm());
+  solving = new AbortController();
+  $("solveBtn").disabled = true; $("stopBtn").disabled = false;
+  $("verdict").textContent = "Solving each send-in…"; $("verdict").classList.remove("tie");
+  $("optionsTable").querySelector("tbody").innerHTML = "";
+  const render = (rows, chosen = null) => {
+    $("optionsTable").querySelector("tbody").innerHTML = rows.map((x) => RESULT_ROW(`${x.label} <span class="pm">(then: ${x.row.label})</span>`, x.row, x.j === chosen)).join("");
+  };
+  try {
+    const t0 = Date.now();
+    const d = await decideSendIn(cands, async (fight, ms) => {
+      $("progress").textContent = `Solving ${fight.labels[0].replace(/^Stay in \((.*)\)$/, "$1")}… (${((Date.now() - t0) / 1000).toFixed(0)} s)`;
+      return solveInBrowser(fight, { budgetMs: ms, signal: solving.signal });
+    }, { budgetMs: Number($("budget").value), onProgress: (rows) => render(rows) });
+    render(d.rows, d.j);
+    $("verdict").textContent = `Send in ${cands.find((c) => c.j === d.j).species} -- ${d.why}`;
+    $("verdict").classList.toggle("tie", !!d.tie);
+    $("progress").textContent = `done in ${((Date.now() - t0) / 1000).toFixed(0)} s`;
+    $("notes").textContent = d.tie ? "First turn, each sent in: " + d.tie.stats.map((x) => `${cands.find((c) => c.j === x.j).species}: KO before it acts ${pct(x.pKO, 1)}, damage dealt ${pct(x.dmg)}, HP lost ${pct(x.lost)}, drops to low-HP mode ${pct(x.pLow)}${x.choice ? ", Choice item" : ""} (trade ${(100 * x.trade).toFixed(1)})`).join("; ") + "." : "";
+  } catch (e) {
+    $("verdict").textContent = "—";
+    $("solveError").textContent = `The solve stopped: ${e.message}`;
+  } finally {
+    solving = null;
+    $("solveBtn").disabled = false; $("stopBtn").disabled = true;
+  }
+}
 async function solve() {
   refresh();
+  if ($("youFainted").checked) {
+    if (!teamCfgs) { $("solveError").textContent = "Paste your team and press “Use team”."; return; }
+    try { readForm(); } catch (e) { $("solveError").textContent = e.message; return; }
+    return solveSendIn();
+  }
   if (!fight) { $("solveError").textContent = $("notes").textContent; return; }
   solving = new AbortController();
   $("solveBtn").disabled = true; $("stopBtn").disabled = false;
@@ -322,6 +370,7 @@ function init() {
   for (const ev of ["input", "change"]) document.addEventListener(ev, (e) => {
     if (!e.target.classList?.contains("trigger") && e.target.name !== "outMon") return;
     if (e.target.id === "o-status") syncStatusRows("o");
+    if (e.target.id === "oppSet" && e.type === "change") $("oppGender").value = ""; // a new mon
     if (["challenge", "battle"].includes(e.target.id) && e.type === "change") $("brain").value = brainFor(runInputs()) ?? "";
     if (["challenge", "battle", "brain"].includes(e.target.id) || e.target.name === "oppIndex") brainChanged();
     else if (e.target.id === "bracketOnly") refreshSetList();

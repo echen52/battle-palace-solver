@@ -34,6 +34,9 @@
     <div id="activeBlock" class="active-block" hidden>
       <h3>Out now: <span id="activeName"></span></h3>
       <div class="field-row">
+        <input type="checkbox" id="youFainted" class="trigger" /><label for="youFainted" class="chk-label" title="Your mon out was just knocked out: Solve compares sending in each healthy teammate (each solved; a near-tie is solved again, then decided by the first turn: KO chance, damage dealt against HP lost, no Choice item).">Just fainted: who goes in?</label>
+      </div>
+      <div class="field-row">
         <label title="Leave all at 0 at the start of a battle: switch-in effects such as Intimidate are applied for you.">Stages</label>
         <div class="stage-grid" id="youStages"></div>
       </div>
@@ -175,6 +178,14 @@
     <div class="field-row" id="oppAbilityRow" hidden>
       <label for="oppAbility">Ability</label>
       <select id="oppAbility" class="trigger"></select>
+    </div>
+    <div class="field-row" id="oppGenderRow" hidden>
+      <label for="oppGender" title="The ♂/♀ next to its name in battle. Only Attract and Cute Charm read it.">Gender</label>
+      <select id="oppGender" class="trigger">
+        <option value="">Unknown</option>
+        <option value="male">Male ♂</option>
+        <option value="female">Female ♀</option>
+      </select>
     </div>
     <div class="field-row" id="oppIvRow" hidden>
       <label for="oppIv" title="Every Frontier trainer gives all its Pokémon one IV value; which trainer you met decides it.">IVs</label>

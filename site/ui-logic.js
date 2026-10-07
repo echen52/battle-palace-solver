@@ -13,6 +13,7 @@ import { FRONTIER_TRAINERS } from "../engine/frontier-trainers.js";
 import { trainerPrior, fixedIvs, makeNextIn, BRAIN_TEAMS } from "../engine/next-in.js";
 import { lowHpCheck, palaceChoices, quickClawDraws, GROUP_NAMES } from "../engine/palace.js";
 import { rootActions } from "../engine/solve.js";
+import { chooseLever, tiedWithBest, tieBreak, trade, firstTurnStatsTeam } from "../engine/policy.js";
 
 export const STAGE_KEYS = ["atk", "def", "spa", "spd", "spe", "accuracy", "evasion"];
 const HIGH_TIER = 849;
@@ -79,12 +80,29 @@ export function ivTierOdds(setKey, { challenge, battle } = {}) {
   return [...by.entries()].map(([iv, w]) => ({ iv, p: w / total })).sort((a, b) => b.p - a.p);
 }
 
-export function buildOpponent({ setKey, ability, ivTier }) {
+// gender: "male" / "female" as the game shows it, or null (unknown -- the
+// engine then splits each Attract by the species' odds). Ignored for a
+// species with one gender.
+export function buildOpponent({ setKey, ability, ivTier, gender = null }) {
   const e = FRONTIER_POOL[setKey];
   if (!e) throw new Error(`no Frontier set named "${setKey}"`);
   const ab = ability || (e.abilities.length === 1 ? e.abilities[0] : null);
   if (!ab) throw new Error(`${setKey} can have ${e.abilities.join(" or ")} -- pick one`);
-  return L.buildFrontierOpponent(getOpponentConfig(setKey, { ability: ab, ivTier, allowUnreachableTier: true }));
+  const mon = L.buildFrontierOpponent(getOpponentConfig(setKey, { ability: ab, ivTier, allowUnreachableTier: true }));
+  return gender && mon.genderDist.length > 1 ? { ...mon, genderDist: [{ p: 1, gender }] } : mon;
+}
+// A built mon's gender for display: "male" / "female" / "genderless", or null
+// when it can be either and nobody said which.
+export const genderOf = (mon) => (mon.genderDist.length === 1 ? mon.genderDist[0].gender : null);
+
+// Attract / Cute Charm are the only effects that read gender: a note when one
+// of them is in play and a gender they need is unknown.
+const ATTRACTERS = (m) => m.moves.includes("Attract") || m.ability === "Cute Charm";
+function genderNote(team, active, opp) {
+  const you = team[active];
+  if (!ATTRACTERS(opp) && !ATTRACTERS(you)) return null;
+  const unknown = [genderOf(you) ? null : `your ${you.species} (add (M) or (F) after its name in the paste)`, genderOf(opp) ? null : `their ${opp.species} (set it in the Opponent panel)`].filter(Boolean);
+  return unknown.length ? `Attract / Cute Charm in play and the gender of ${unknown.join(" and ")} is not set: the solve treats each Attract as a fresh coin toss on the species' odds.` : null;
 }
 
 // ── sleep ──────────────────────────────────────────────────────────────────
@@ -137,6 +155,11 @@ export function buildFight(form) {
   // Stages: all zero keeps the switch-in stages (Intimidate) teamStart applied.
   for (const [side, st] of [["you", form.you.stages], ["opp", form.opp.stages]]) {
     if (st && STAGE_KEYS.some((k) => st[k])) ov[side + "Stages"] = Object.fromEntries(STAGE_KEYS.map((k) => [k, st[k] ?? 0]));
+  }
+  // form.entering (send-in mode): your mon is coming in now, so its entry
+  // effects (Intimidate) land ON TOP of the opponent's stages as entered.
+  if (form.entering && ov.oppStages) {
+    ov.oppStages = Object.fromEntries(STAGE_KEYS.map((k) => [k, Math.max(-6, Math.min(6, ov.oppStages[k] + (s.oppStages[k] ?? 0)))]));
   }
   if (form.you.confused) ov.youConfused = form.you.confused === 1 ? true : form.you.confused;
   if (form.opp.confused) ov.oppConfused = form.opp.confused === 1 ? true : form.opp.confused;
@@ -209,9 +232,62 @@ export function buildFight(form) {
       notes.push(`Not scoring their next Pokémon: ${e.message}.`);
     }
   }
+  const gn = genderNote(team, form.active, opp);
+  if (gn) notes.push(gn);
   const actions = rootActions(s);
   const labels = actions.map((a) => (a === "stay" ? `Stay in (${team[form.active].species})` : `Switch to ${team[a.switchTo].species}`));
   return { tctx: { team, opp, oppReserves, nextInSpec }, start: mix, actions, labels, notes };
+}
+
+// ── your mon fainted: who goes in ──────────────────────────────────────────
+// form as for buildFight, with form.active = the mon that just fainted. One
+// position per healthy teammate, sent in fresh (no stages, Substitute or
+// confusion; its entry effects applied), the opponent as entered.
+export function buildSendIn(form) {
+  const mons = form.mons.map((m, i) => (i === form.active ? { ...m, hpPct: 0, status: "" } : m));
+  const cands = mons.map((m, i) => i).filter((i) => i !== form.active && mons[i].hpPct > 0);
+  if (!cands.length) throw new Error("no healthy teammate left to send in");
+  const fresh = { stages: Object.fromEntries(STAGE_KEYS.map((k) => [k, 0])), confused: 0, subPct: 0, lowHp: null };
+  return cands.map((j) => ({ j, species: form.team[j].species, fight: buildFight({ ...form, mons, active: j, you: fresh, entering: true }) }));
+}
+
+// The first-turn numbers over a fight's start mix (unknown sleep lengths).
+export function sendInStats(fight, j) {
+  const acc = { pKO: 0, dmg: 0, lost: 0, pLow: 0 };
+  let choice = false;
+  for (const { p, state } of fight.start) {
+    const x = firstTurnStatsTeam(fight.tctx, state, j);
+    for (const k of Object.keys(acc)) acc[k] += p * x[k];
+    choice = x.choice;
+  }
+  return { j, ...acc, choice };
+}
+
+// The decision, as the streak sim makes it (engine/policy.js): solve each
+// candidate (solve(fight, budgetMs) -> { levers }); one clearly better goes
+// in; the tied ones are solved again; still tied -> the first turn decides.
+// Returns { j, why, rows: [{ j, label, value, margin, row }], tie } where row
+// is the candidate's recommended lever and tie the first-turn numbers (when
+// used). onProgress(rows) after each solve.
+export async function decideSendIn(cands, solve, { budgetMs, onProgress = null } = {}) {
+  const rows = [];
+  const run = async (c, ms) => {
+    const r = await solve(c.fight, ms);
+    const rs = resultRows(r.levers, c.fight.labels, c.fight.actions), row = rs.find((x) => x.pick);
+    return { j: c.j, label: `Send in ${c.species}`, value: row.score, margin: row.margin, row, levers: rs };
+  };
+  if (cands.length === 1) return { j: cands[0].j, why: "the only one left", rows: [], tie: null };
+  const per = Math.max(1000, Math.round(budgetMs / cands.length));
+  for (const c of cands) { rows.push(await run(c, per)); onProgress?.(rows); }
+  let tied = tiedWithBest(rows);
+  if (tied.length === 1) return { j: tied[0], why: "clearly best", rows, tie: null };
+  for (const j of tied) { const i = rows.findIndex((x) => x.j === j); rows[i] = await run(cands.find((c) => c.j === j), per); onProgress?.(rows); }
+  tied = tiedWithBest(rows.filter((x) => tied.includes(x.j)));
+  if (tied.length === 1) return { j: tied[0], why: "clearly best after a second solve", rows, tie: null };
+  const stats = tied.map((j) => ({ ...sendInStats(cands.find((c) => c.j === j).fight, j), value: rows.find((x) => x.j === j).value }));
+  const tb = tieBreak(stats);
+  const RULE = { a: "the better chance to KO before it acts", b: "damage dealt against HP lost", c: "no Choice item", score: "the higher score" };
+  return { j: tb.j, why: `too close to call; decided by ${RULE[tb.step]}`, rows, tie: { step: tb.step, stats: stats.map((x) => ({ ...x, trade: trade(x) })) } };
 }
 
 // ── this turn's choices, both sides ────────────────────────────────────────
@@ -236,22 +312,31 @@ export function turnChoices(tctx, mix) {
 }
 
 // ── results ────────────────────────────────────────────────────────────────
-// Levers (montecarlo.js estimate) -> table rows, best first, with the best
-// marked and any lever whose 95% range overlaps the best's marked as a tie.
-export function resultRows(levers, labels) {
-  const rows = levers.map((l, i) => ({ ...l, label: labels[i] }));
+// Levers (montecarlo.js estimate) -> table rows, best score first, with the
+// best marked and any lever whose 95% range overlaps the best's marked as a
+// tie. With the actions given, the RECOMMENDATION (pick) follows the streak
+// sim's rule (engine/policy.js chooseLever): stay unless a switch is clearly
+// better -- a switch whose lead is inside the noise is held (held).
+export function resultRows(levers, labels, actions = null) {
+  const rows = levers.map((l, i) => ({ ...l, label: labels[i], stay: actions ? actions[i] === "stay" : false }));
   const best = rows.reduce((a, b) => (b.score > a.score ? b : a));
-  for (const r of rows) {
+  const choice = actions ? chooseLever(levers, actions) : null;
+  rows.forEach((r, i) => {
     r.best = r === best;
     r.tie = !r.best && r.score + r.margin >= best.score - best.margin;
-  }
+    r.pick = choice ? i === choice.index : r.best;
+    r.held = !!(choice?.held && r.pick);
+  });
   return rows.sort((a, b) => b.score - a.score);
 }
 export const pct = (x, digits = 0) => `${(100 * x).toFixed(digits)}%`;
 export function verdict(rows, info = {}) {
-  const best = rows.find((r) => r.best);
-  const ties = rows.filter((r) => r.tie);
+  const best = rows.find((r) => r.best), pick = rows.find((r) => r.pick) ?? best;
   if (!best) return "";
+  const soFar = info.done ? "" : " (so far)";
+  if (pick.held) return `${pick.label} -- switching isn't clearly better (${best.label} leads by less than the noise)${soFar}`;
+  const ties = rows.filter((r) => r.tie);
+  if (ties.length && pick.stay) return `${pick.label} -- no switch is clearly better${soFar}`;
   if (ties.length) return `${best.label} -- too close to call against ${ties.map((t) => t.label).join(", ")}`;
-  return info.done ? best.label : `${best.label} (so far)`;
+  return `${best.label}${soFar}`;
 }

@@ -124,5 +124,64 @@ const st = (form) => U.buildFight(form).start[0].state;
   ok(tied[1].tie && /too close to call against a/.test(U.verdict(tied, { done: true })), "overlapping ranges: too close to call");
 }
 
+// ── 2026-10-07: the recommendation rule, gender, send-in mode ──────────────
+{
+  const lev = (score, margin) => ({ score, margin, pKO: 1, pOppLeft: 0, pLose: 0, turns: 2, rollouts: 100, exactFirstTurn: true });
+  const A = ["stay", { switchTo: 1 }, { switchTo: 2 }], L3 = ["Stay in (M)", "Switch to L", "Switch to S"];
+  // the Zapdos case: a switch ahead by less than the noise is held
+  let rows = U.resultRows([lev(0.351, 0.052), lev(0.352, 0.031), lev(0.339, 0.05)], L3, A);
+  let v = U.verdict(rows, { done: true });
+  ok(rows.find((r) => r.pick).label === "Stay in (M)" && rows[0].label === "Switch to L" && v.startsWith("Stay in (M) -- switching isn't clearly better (Switch to L leads"), `held switch -> stay: "${v}"`);
+  rows = U.resultRows([lev(0.36, 0.03), lev(0.35, 0.03), lev(0.2, 0.01)], L3, A);
+  v = U.verdict(rows, { done: true });
+  ok(rows.find((r) => r.pick).label === "Stay in (M)" && v === "Stay in (M) -- no switch is clearly better", `stay best, a switch within the noise: "${v}"`);
+  rows = U.resultRows([lev(0.30, 0.01), lev(0.40, 0.01), lev(0.2, 0.01)], L3, A);
+  ok(rows.find((r) => r.pick).label === "Switch to L" && U.verdict(rows, { done: true }) === "Switch to L", "a clearly better switch is the pick");
+  rows = U.resultRows([lev(0.30, 0.01), lev(0.40, 0.03), lev(0.39, 0.03)], L3, A);
+  ok(rows.find((r) => r.pick).label === "Switch to L" && U.verdict(rows, { done: true }).includes("too close to call against Switch to S"), "two switches tied, both clearly above stay: too close to call");
+  ok(U.verdict(U.resultRows([lev(0.351, 0.052), lev(0.352, 0.031)], L3.slice(0, 2), A.slice(0, 2)), { done: false }).endsWith("(so far)"), "(so far) while solving");
+
+  // gender: the opponent's as entered; a one-gender species ignores it
+  const m7 = U.buildOpponent({ setKey: "Machamp 7", ivTier: 31 });
+  ok(U.genderOf(m7) === null && U.genderOf(U.buildOpponent({ setKey: "Machamp 7", ivTier: 31, gender: "female" })) === "female", "Machamp: unknown unless set");
+  ok(U.genderOf(U.buildOpponent({ setKey: "Gardevoir 8", ability: "Trace", ivTier: 31, gender: "male" })) === "male", "Gardevoir set to male");
+  ok(U.genderOf(U.buildOpponent({ setKey: "Latios 1", ivTier: 31, gender: "female" })) === "male", "a one-gender species (Latios) ignores the setting");
+  const blocks = (f) => fs.readFileSync(path.join(here, f), "utf8").split(/\r?\n\s*\r?\n/).filter((b) => b.trim());
+  const latiosOnly = U.parseTeam(blocks("../teams/user-test-team.txt").find((b) => b.trim().startsWith("Latios")));
+  const att = (gender) => U.buildFight(base({ team: latiosOnly, mons: [mon()], opp: { ...base().opp, setKey: "Machamp 7", ivTier: 31, gender }, run: { challenge: 8, battle: 1, oppIndex: 1 } }));
+  ok(att(null).notes.some((n) => /Attract .*their Machamp/.test(n)), "Attract in play, their gender unknown: a note");
+  ok(!att("female").notes.some((n) => /Attract/.test(n)) && att("female").tctx.opp.genderDist.length === 1, "gender set: no note, a fixed gender in the solve");
+  ok(!U.buildFight(base()).notes.some((n) => /Attract/.test(n)), "no Attract or Cute Charm: no note");
+  const landed = (g) => { const f = att(g); return T.teamTurn(f.tctx, f.start[0].state, "stay").filter((r) => r.chose.opp === "Attract" && r.state.youAttracted).reduce((a, r) => a + r.p, 0); };
+  ok(landed("male") === 0 && landed("female") > 0, "a male Machamp's Attract never lands on Latios; a female's does");
+
+  // send-in: candidates, fresh entry, Intimidate on top of the entered stages
+  const ut = blocks("../teams/user-test-team.txt");
+  const team3 = U.parseTeam([ut.find((b) => b.trim().startsWith("Metagross")), ut.find((b) => b.trim().startsWith("Latios")), blocks("../teams/cb/all-sets.txt").find((b) => b.trim().startsWith("Salamence"))].join("\n\n"));
+  const form = base({ team: team3, mons: team3.map(() => mon()), active: 0, you: { stages: { ...zero, spe: 2 }, confused: 2, subPct: 20, lowHp: true },
+    opp: { ...base().opp, setKey: "Machamp 5", ability: "Guts", ivTier: 31, stages: { ...zero, atk: 1 } }, run: { challenge: 8, battle: 1, oppIndex: 1 } });
+  const cands = U.buildSendIn(form);
+  ok(cands.map((c) => c.species).join() === "Latios,Salamence", "candidates: the healthy teammates, not the fainted mon");
+  const sIn = (sp) => cands.find((c) => c.species === sp).fight.start[0].state;
+  ok(sIn("Latios").youStages.spe === 0 && !sIn("Latios").youSubstituteHP && !sIn("Latios").youConfused, "sent in fresh: no stages, Substitute or confusion");
+  ok(sIn("Latios").oppStages.atk === 1 && sIn("Salamence").oppStages.atk === 0, "Salamence's Intimidate lands on top of their +1 Atk (-> 0); Latios leaves it at +1");
+  ok(sIn("Salamence").youBench[0].hpPct === 0, "the fainted mon is on the bench at 0 HP");
+  ok(throws(() => U.buildSendIn({ ...form, mons: [mon(), mon({ hpPct: 0 }), mon({ hpPct: 0 })] }), /no healthy teammate/), "nobody left: an error");
+
+  // the decision, with a stand-in solve that scores by species
+  const nameOf = (fight) => fight.labels[0].slice("Stay in (".length, -1);
+  const fake = (byName) => async (fight) => ({ levers: fight.actions.map((a, i) => lev(...(i === 0 ? byName[nameOf(fight)] : [0.1, 0.01]))) });
+  let calls = 0; const counted = (f) => async (...a) => { calls++; return f(...a); };
+  let d = await U.decideSendIn(cands, counted(fake({ Latios: [0.6, 0.01], Salamence: [0.5, 0.01] })), { budgetMs: 4000 });
+  ok(d.j === cands[0].j && d.why === "clearly best" && calls === 2 && !d.tie, "clearly better: in after one solve each");
+  calls = 0;
+  d = await U.decideSendIn(cands, counted(fake({ Latios: [0.55, 0.03], Salamence: [0.56, 0.03] })), { budgetMs: 4000 });
+  ok(calls === 4 && d.tie && d.tie.stats.length === 2 && d.why.includes("decided by"), `tied twice: solved again, then the first turn (${d.why})`);
+  const x = d.tie.stats;
+  ok(x.every((t) => t.pKO >= 0 && t.pKO <= 1 && t.dmg >= 0 && t.lost >= 0) && x.find((t) => t.j === 2).choice && !x.find((t) => t.j === 1).choice, "first-turn numbers are probabilities / shares; Salamence holds the Choice Band");
+  d = await U.decideSendIn([cands[0]], fake({}), { budgetMs: 1000 });
+  ok(d.j === cands[0].j && d.why === "the only one left", "one candidate: no solve");
+}
+
 console.log(`test-ui-logic: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
