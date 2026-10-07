@@ -119,9 +119,33 @@ async function playBattle(i) {
     if (st[side + "SubstituteHP"] > 0) bits.push("Sub");
     return bits.length ? ` [${bits.join(", ")}]` : "";
   };
-  const where = (st) => `${B.team[st.youActive].species} ${st.yourHpPct.toFixed(0)}%${extra(st, "you")} vs ${B.oppTeam[st.oppActive].species} ${st.oppHpPct.toFixed(0)}%${extra(st, "opp")}`
+  // HP in points (the engine keeps HP as a percentage of max HP)
+  const hp = (pct, mon) => `${Math.round((pct * mon.stats.hp) / 100)}/${mon.stats.hp}`;
+  const where = (st) => `${B.team[st.youActive].species} ${hp(st.yourHpPct, B.team[st.youActive])}${extra(st, "you")} vs ${B.oppTeam[st.oppActive].species} ${hp(st.oppHpPct, B.oppTeam[st.oppActive])}${extra(st, "opp")}`
     + (B.oppTeam[st.oppActive].ability === "Truant" ? (L.vf(st, "oppTruantLoaf") ? " (Slaking loafs next)" : " (Slaking acts next)") : "");
-  trace(`\n=== battle ${n}: ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}) ===`);
+  // the rest of the field, for the trace: both benches, weather, items, side effects
+  const field = (st) => {
+    const bench = (mons, b) => b.map((x, j) => (x ? `${mons[j].species} ${hp(x.hpPct, mons[j])}${x.status ? ` ${x.status}` : ""}${x.berryConsumed ? " (berry used)" : ""}` : null)).filter(Boolean).join(", ") || "none";
+    const bits = [];
+    if (st.weatherType) bits.push(`weather ${st.weatherType}${st.weatherTurns ? ` (${st.weatherTurns} turns left)` : ""}`);
+    for (const side of ["you", "opp"]) {
+      const mon = side === "you" ? B.team[st.youActive] : B.oppTeam[st.oppActive], it = [];
+      if (st[side + "BerryConsumed"] || st[side + "UsedItem"]) it.push(`${mon.item} used`);
+      if (st[side + "ChoiceLock"] != null) it.push(`locked into ${mon.moves[st[side + "ChoiceLock"]] ?? st[side + "ChoiceLock"]}`);
+      if (st[side + "SpikesLayers"]) it.push(`Spikes x${st[side + "SpikesLayers"]}`);
+      if (st[side + "ReflectTurns"]) it.push(`Reflect ${st[side + "ReflectTurns"]}`);
+      if (st[side + "LightScreenTurns"]) it.push(`Light Screen ${st[side + "LightScreenTurns"]}`);
+      if (st[side + "Seeded"]) it.push("Leech Seeded");
+      if (st[side + "Confused"]) it.push("confused");
+      if (st[side + "Cursed"]) it.push("Cursed");
+      if (st[side + "PalaceLowHp"]) it.push("Palace low-HP row");
+      if (it.length) bits.push(`${side === "you" ? "yours" : "theirs"}: ${it.join(", ")}`);
+    }
+    return `bench: yours ${bench(B.team, st.youBench)} | theirs ${bench(B.oppTeam, st.oppBench)}${bits.length ? ` | ${bits.join("; ")}` : ""}`;
+  };
+  const setLine = (m) => `${m.species} @ ${m.item} | ${m.ability} | ${m.nature} | HP ${m.stats.hp} Atk ${m.stats.atk} Def ${m.stats.def} SpA ${m.stats.spa} SpD ${m.stats.spd} Spe ${m.stats.spe} | ${m.moves.join(" / ")}`;
+  trace(`\n=== battle ${n}: trainer ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}; IVs ${d.iv}) ===`);
+  if (TRACE) { for (const m of B.oppTeam) trace(`  theirs: ${setLine(m)}`); for (const m of B.team) trace(`  yours:  ${setLine(m)}`); }
   for (; turn < TURN_CAP && !result; turn++) {
     let action = "stay", levers = null;
     const before = where(s);
@@ -135,7 +159,7 @@ async function playBattle(i) {
     const r = pick(Bt.battleTurn(B, s, action));
     s = r.state; note();
     trace(`turn ${turn + 1}: ${before} -> ${name(action)}${levers ? `  [${levers.map(([a, v]) => `${name(a)} ${v.toFixed(3)}`).join(", ")}]` : ""}`
-      + `\n    you: ${r.chose?.you ?? "-"} | they: ${r.chose?.opp ?? "-"}${r.label && r.label.trim() !== ";" ? `  (${r.label.trim()})` : ""}\n    now ${where(s)}`);
+      + `\n    you: ${r.chose?.you ?? "-"} | they: ${r.chose?.opp ?? "-"}${r.label && r.label.trim() !== ";" ? `  (${r.label.trim()})` : ""}\n    now ${where(s)}\n    ${field(s)}`);
     if (r.outcome === "replace") {
       const cands = T.aliveBench(s);
       let j = cands[0];
@@ -149,7 +173,7 @@ async function playBattle(i) {
         decisions++;
       }
       s = Bt.replaceYours(B, s, j); note();
-      trace(`    fainted -> send in ${B.team[j].species}; now ${where(s)}`);
+      trace(`    fainted -> send in ${B.team[j].species}; now ${where(s)}\n    ${field(s)}`);
     } else if (r.outcome) {
       result = r.outcome;
     }

@@ -312,6 +312,18 @@ battles. ~40 s a battle machine-wide; Salamence + Snorlax slowest (stalls,
 one 54-min battle). teams/mlsuicune.txt has Lum on both Latios and Suicune
 -- not enterable (frontier_util.c AppendIfValid, 1994-2000 rejects a
 repeated held item); the runs use Suicune Leftovers.
+LOSS LOGS (user asked, 2026-10-07): results/solver-cb/loss-logs/<team>-losses.txt
+(all 20 losses, replayed with --trace; trace now prints HP in points, both
+benches, weather, items used, Choice lock, screens, Spikes, the Palace
+low-HP row, and every set). Every replay matches the original's result /
+turns / switches / decisions. REPLAYS ARE LOAD-DEPENDENT: the solver stops
+on wall-clock budget, so near-ties flip with machine load -- 17/20 matched
+first time; 264 and 299 on a retry; Spenser battle 126 (Swampert team) WINS
+21/21 replayed alone and LOSES 8/8 with 4 replays at once (turn 8: switch
+to Metagross 0.541 vs stay 0.540). Its loss: Latios left in on Slaking's
+ACTING turn (stay 0.638 vs Metagross 0.531) and Hyper Beamed -- the same
+pattern as streak battle 441 (open note (b)). Not shown in traces: crits
+and misses (no label; read off the HP change).
 
 ## Side finding
 
