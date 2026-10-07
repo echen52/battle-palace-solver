@@ -83,7 +83,7 @@ async function solve(B, s, spec, seed) {
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;
   const best = r.levers.reduce((bi, l, i) => (l.score > r.levers[bi].score ? i : bi), 0);
-  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score]) };
+  const out = { action: actions[best], value: r.levers[best].score, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy };
   solveCache.set(key, out);
   return out;
 }
@@ -130,7 +130,9 @@ async function playBattle(i) {
     if (st.weatherType) bits.push(`weather ${st.weatherType}${st.weatherTurns ? ` (${st.weatherTurns} turns left)` : ""}`);
     for (const side of ["you", "opp"]) {
       const mon = side === "you" ? B.team[st.youActive] : B.oppTeam[st.oppActive], it = [];
-      if (st[side + "BerryConsumed"] || st[side + "UsedItem"]) it.push(`${mon.item} used`);
+      if (st[side + "BerryConsumed"]) it.push(`${mon.item} consumed`);
+      // usedHeldItems is kept per battle SLOT (Recycle's memory), not per mon
+      else if (st[side + "UsedItem"]) it.push(`slot used a ${st[side + "UsedItem"]} earlier`);
       if (st[side + "ChoiceLock"] != null) it.push(`locked into ${mon.moves[st[side + "ChoiceLock"]] ?? st[side + "ChoiceLock"]}`);
       if (st[side + "SpikesLayers"]) it.push(`Spikes x${st[side + "SpikesLayers"]}`);
       if (st[side + "ReflectTurns"]) it.push(`Reflect ${st[side + "ReflectTurns"]}`);
@@ -138,6 +140,14 @@ async function playBattle(i) {
       if (st[side + "Seeded"]) it.push("Leech Seeded");
       if (st[side + "Confused"]) it.push("confused");
       if (st[side + "Cursed"]) it.push("Cursed");
+      if (st[side + "Attracted"]) it.push("infatuated");
+      if (st[side + "YawnTurns"]) it.push(`drowsy (Yawn ${st[side + "YawnTurns"]})`);
+      if (st[side + "TauntTurns"]) it.push(`Taunted ${st[side + "TauntTurns"]}`);
+      if (st[side + "EncoreTurns"]) it.push(`Encored ${st[side + "EncoreTurns"]}`);
+      if (st[side + "DisableTurns"]) it.push(`Disabled ${st[side + "DisableTurns"]}`);
+      if (st[side + "PerishCount"] != null) it.push(`Perish ${st[side + "PerishCount"]}`);
+      if (st[side + "Status"] === "sleep" && st[side + "SleepTurns"] != null) it.push(`sleep counter ${st[side + "SleepTurns"]}`);
+      if (st[side + "Status"] === "toxic" || st[side + "ToxicCounter"]) it.push(`toxic counter ${st[side + "ToxicCounter"]}`);
       if (st[side + "PalaceLowHp"]) it.push("Palace low-HP row");
       if (it.length) bits.push(`${side === "you" ? "yours" : "theirs"}: ${it.join(", ")}`);
     }
@@ -147,33 +157,35 @@ async function playBattle(i) {
   trace(`\n=== battle ${n}: trainer ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}; IVs ${d.iv}) ===`);
   if (TRACE) { for (const m of B.oppTeam) trace(`  theirs: ${setLine(m)}`); for (const m of B.team) trace(`  yours:  ${setLine(m)}`); }
   for (; turn < TURN_CAP && !result; turn++) {
-    let action = "stay", levers = null;
+    let action = "stay", levers = null, stopBy = null;
     const before = where(s);
     if (T.aliveBench(s).length > 0) {
       const sv = await solve(B, s, specFor(d, n, s, seen), seedOf(SEED, "solve", n, turn));
-      action = sv.action; levers = sv.levers;
+      action = sv.action; levers = sv.levers; stopBy = sv.stoppedBy;
       if (process.env.DUMP_LOW && sv.value < Number(process.env.DUMP_LOW)) fs.appendFileSync(TRACE + ".states", JSON.stringify({ n, turn: turn + 1, spec: specFor(d, n, s, seen), abilities: d.abilities, keys: d.keys, s }) + "\n");
       decisions++;
       if (action !== "stay") switches++;
     }
     const r = pick(Bt.battleTurn(B, s, action));
     s = r.state; note();
-    trace(`turn ${turn + 1}: ${before} -> ${name(action)}${levers ? `  [${levers.map(([a, v]) => `${name(a)} ${v.toFixed(3)}`).join(", ")}]` : ""}`
+    trace(`turn ${turn + 1}: ${before} -> ${name(action)}${levers ? `  [${levers.map(([a, v, m]) => `${name(a)} ${v.toFixed(3)}${m ? `±${m.toFixed(3)}` : ""}`).join(", ")}; ${stopBy}]` : ""}`
       + `\n    you: ${r.chose?.you ?? "-"} | they: ${r.chose?.opp ?? "-"}${r.label && r.label.trim() !== ";" ? `  (${r.label.trim()})` : ""}\n    now ${where(s)}\n    ${field(s)}`);
     if (r.outcome === "replace") {
       const cands = T.aliveBench(s);
-      let j = cands[0];
+      let j = cands[0], replVals = null;
       if (cands.length > 1) {
         let bestV = -Infinity;
+        replVals = [];
         for (const c of cands) {
           const sc = Bt.replaceYours(B, s, c);
           const v = (await solve(B, sc, specFor(d, n, sc, seen.includes(sc.oppActive) ? seen : [...seen, sc.oppActive]), seedOf(SEED, "repl", n, turn, c))).value;
+          replVals.push(`${B.team[c].species} ${v.toFixed(3)}`);
           if (v > bestV) { bestV = v; j = c; }
         }
         decisions++;
       }
       s = Bt.replaceYours(B, s, j); note();
-      trace(`    fainted -> send in ${B.team[j].species}; now ${where(s)}\n    ${field(s)}`);
+      trace(`    fainted -> send in ${B.team[j].species}${replVals ? ` [${replVals.join(", ")}]` : ""}; now ${where(s)}\n    ${field(s)}`);
     } else if (r.outcome) {
       result = r.outcome;
     }
