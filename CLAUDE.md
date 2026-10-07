@@ -341,6 +341,15 @@ REPLAY of the 20 losses: A+B+D 10 wins / 20; control (B+D, old rule) 4 / 20
 (same battles, same load) -> 6 battles turned by A. Switches 19 vs 39.
 Biased sample (losses only): the paired 250-battle block is the real test.
 Logs: results/solver-cb/loss-logs-v2/.
+REPLACEMENT AFTER A FAINT (user, 2026-10-07; b2cfb57): each candidate solved;
+clearly better (ranges don't overlap) goes in; tied ones re-solved with +2 s;
+still tied -> first turn, exact (sim/policy.mjs tieBreak): a KO before it
+acts (5-pt band), b damage dealt (only if no candidate reaches 5% KO), c no
+Choice item, d least HP lost, then score. --repl best = old rule. Battle
+211's pick was NOT a tie (Aerodactyl 0.550+-0.002 vs Latios 0.536+-0.005;
+Aerodactyl KOs before being hit 89.4% vs Latios 55.8% -- Latios picks Sub
+37%). Replay of the 20 losses with everything: 11/20 wins; 15 multi-
+candidate send-ins, 8 tied, 6 decided by the rule (5 by b, 1 by a).
 
 ## Side finding
 
