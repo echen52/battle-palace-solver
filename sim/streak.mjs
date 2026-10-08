@@ -30,6 +30,7 @@ import { rootActions } from "../engine/solve.js";
 import { runSolve } from "../engine/solve-core.js";
 import { makeDraw, seedOf, challengeOf, stageOf, isSpenser, FIRST_LATE } from "./draw.mjs";
 import { genderOf, withGender } from "./gender.mjs";
+import { trainerName, trainerLabel } from "./trainer-name.mjs";
 import { chooseLever, tiedWithBest, tieBreak, firstTurnStats, trade } from "./policy.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, x, i, all) => (x.startsWith("--") ? [...a, [x.slice(2), all[i + 1]]] : a), []));
@@ -174,7 +175,7 @@ async function playBattle(i) {
     return `bench: yours ${bench(B.team, st.youBench)} | theirs ${bench(B.oppTeam, st.oppBench)}${bits.length ? ` | ${bits.join("; ")}` : ""}`;
   };
   const setLine = (m) => `${m.species} (${m.genderDist.length === 1 ? m.genderDist[0].gender : "?"}) @ ${m.item} | ${m.ability} | ${m.nature} | HP ${m.stats.hp} Atk ${m.stats.atk} Def ${m.stats.def} SpA ${m.stats.spa} SpD ${m.stats.spd} Spe ${m.stats.spe} | ${m.moves.join(" / ")}`;
-  trace(`\n=== battle ${n}: trainer ${d.trainer} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}; IVs ${d.iv}) ===`);
+  trace(`\n=== battle ${n}: trainer ${trainerLabel(d.trainer)} (${d.keys.join(" / ")}; ${d.abilities.join(" / ")}; IVs ${d.iv}) ===`);
   if (TRACE) { for (const m of B.oppTeam) trace(`  theirs: ${setLine(m)}`); for (const m of B.team) trace(`  yours:  ${setLine(m)}`); }
   for (; turn < TURN_CAP && !result; turn++) {
     let action = "stay", levers = null, stopBy = null;
@@ -233,7 +234,7 @@ async function playBattle(i) {
     }
   }
   trace(`result: ${result ?? "turnCap"}`);
-  return { i, n, trainer: d.trainer, keys: d.keys, abilities: d.abilities, iv: d.iv, result: result ?? "turnCap", turns: turn,
+  return { i, n, trainer: d.trainer, trainerName: trainerName(d.trainer), keys: d.keys, abilities: d.abilities, iv: d.iv, result: result ?? "turnCap", turns: turn,
     decisions, switches, youLeft: result === "win" ? 1 + T.aliveBench(s).length : 0, ms: Date.now() - t0 };
 }
 

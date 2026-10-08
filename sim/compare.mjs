@@ -8,6 +8,7 @@
 // exact two-sided sign test on those).
 import fs from "node:fs";
 import path from "node:path";
+import { trainerLabel } from "./trainer-name.mjs";
 
 const files = process.argv.slice(2);
 if (files.length < 1) throw new Error("usage: node sim/compare.mjs a.jsonl [b.jsonl ...]");
@@ -35,7 +36,7 @@ for (const r of runs) {
     + ` | switches/battle ${fmt(mean(played.map((l) => l.switches)), 2)}`
     + ` | turn caps ${ls.filter((l) => l.result === "turnCap").length}, errors ${ls.filter((l) => l.result === "error").length}`);
   const losses = played.filter((l) => l.result !== "win");
-  if (losses.length) console.log(`   lost to: ${losses.map((l) => `${l.n} ${l.trainer} (${l.keys.join("/")})`).join("; ")}`);
+  if (losses.length) console.log(`   lost to: ${losses.map((l) => `${l.n} ${trainerLabel(l.trainer)} (${l.keys.join("/")})`).join("; ")}`);
   const errs = ls.filter((l) => l.result === "error");
   if (errs.length) console.log(`   errors: ${[...new Set(errs.map((l) => l.error))].join(" | ")}`);
   // the screen's per-slot counters (sim/screen-core.mjs), per battle played
