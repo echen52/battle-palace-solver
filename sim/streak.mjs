@@ -99,15 +99,21 @@ async function solve(B, s, spec, seed, { budget = BUDGET, fresh = false } = {}) 
   const key = JSON.stringify([s, ni?.spec ?? null, B.team.map((m) => m.genderDist[0].gender), B.oppTeam[s.oppActive].genderDist[0].gender]);
   if (!fresh && solveCache.has(key)) { cacheHits++; return solveCache.get(key); }
   const t0 = Date.now();
-  const actions = rootActions(s);
+  const actions = rootActions(s, Bt.view(B, s));
   const r = await runSolve({
     pool, actions, budgetMs: budget, seed,
     init: { team: B.team, opp: B.oppTeam[s.oppActive], oppReserves: Bt.aliveOpp(s).length, exactRoll: true, weights: WEIGHTS,
       nextInSpec: ni?.spec ?? null, nextInWarm: ni?.warm ?? null, start: [{ p: 1, state: s }] },
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;
-  const { index: best, held } = chooseLever(r.levers, actions, { stayBias: STAY_BIAS });
-  const out = { action: actions[best], value: r.levers[best].score, margin: r.levers[best].margin ?? 0, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy, held };
+  // Your mon at perish count 0 faints at this turn's end: it switches out
+  // (user, 2026-10-08) -- the best-scoring switch; staying is not an option
+  // (engine/solve.js perishSwitch has the same rule for the rollouts)
+  const perish = s.youPerishCount === 0 && L.vf(s, "youPerishSonged") && actions.length > 1;
+  const { index: best, held } = perish
+    ? { index: actions.reduce((bi, a, i) => (a !== "stay" && (actions[bi] === "stay" || r.levers[i].score > r.levers[bi].score) ? i : bi), 0), held: false }
+    : chooseLever(r.levers, actions, { stayBias: STAY_BIAS });
+  const out = { action: actions[best], value: r.levers[best].score, margin: r.levers[best].margin ?? 0, levers: r.levers.map((l, i) => [actions[i], l.score, l.margin]), stoppedBy: r.stoppedBy, held, perish };
   solveCache.set(key, out);
   return out;
 }
@@ -185,7 +191,7 @@ async function playBattle(i) {
     const before = where(s);
     if (T.aliveBench(s).length > 0) {
       const sv = await solve(B, s, specFor(d, n, s, seen), seedOf(SEED, "solve", n, turn));
-      action = sv.action; levers = sv.levers; stopBy = sv.stoppedBy + (sv.held ? "; switch not clearly better -> stay" : "");
+      action = sv.action; levers = sv.levers; stopBy = sv.stoppedBy + (sv.held ? "; switch not clearly better -> stay" : "") + (sv.perish ? "; perish count 0 -> must switch" : "");
       if (process.env.DUMP_LOW && sv.value < Number(process.env.DUMP_LOW)) fs.appendFileSync(TRACE + ".states", JSON.stringify({ n, turn: turn + 1, spec: specFor(d, n, s, seen), abilities: d.abilities, keys: d.keys, s }) + "\n");
       decisions++;
       if (action !== "stay") switches++;

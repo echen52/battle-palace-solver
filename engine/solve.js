@@ -16,7 +16,8 @@
 // search stops at its time budget and says so (complete: false) -- step 3's
 // Monte Carlo takes over there.
 
-import { teamTurn, replace, aliveBench } from "./team.js";
+import { teamTurn, replace, aliveBench, youCanSwitch } from "./team.js";
+import { vf } from "./logic.js";
 import { scoreState } from "./score.js";
 
 const keyOf = (s) => JSON.stringify(s);
@@ -41,9 +42,37 @@ export function chooseReplacement(tctx, s, weights, cache = null) {
   return bestJ;
 }
 
-// The levers at a position: "stay" and { switchTo: j } for each healthy bench mon.
-export function rootActions(s) {
+// The levers at a position: "stay" and { switchTo: j } for each healthy bench
+// mon -- given tctx, none while your mon cannot switch (team.js youCanSwitch).
+export function rootActions(s, tctx = null) {
+  if (tctx && !youCanSwitch(tctx, s)) return ["stay"];
   return ["stay", ...aliveBench(s).map((j) => ({ switchTo: j }))];
+}
+
+// Your mon at perish count 0 -- it faints at this turn's end
+// (src/battle_util.c:1843-1856) -- switches out when it can (user,
+// 2026-10-08: "our side should also know to switch out on perish song if it is
+// 1 turn remaining"), the trigger the opponent's AI uses too
+// (ShouldSwitchIfPerishSong, src/battle_ai_switch_items.c:20-34). Returns
+// { switchTo: j } -- the switch with the best one-turn lookahead (as
+// chooseReplacement, point estimate) -- or null (not counted down, nobody to
+// switch to, or trapped).
+export function perishSwitch(tctx, s, weights, cache = null) {
+  if (s.youPerishCount !== 0 || !vf(s, "youPerishSonged") || s.yourHpPct <= 0) return null;
+  const bench = aliveBench(s);
+  if (!bench.length || !youCanSwitch(tctx, s)) return null;
+  const k = cache ? "perish:" + keyOf(s) : null;
+  if (cache?.has(k)) return cache.get(k);
+  const t = tctx.exactRoll || tctx.rollSample ? { ...tctx, exactRoll: false, rollSample: null } : tctx;
+  let best = -Infinity, bestJ = bench[0];
+  for (const j of bench) {
+    let v = 0;
+    for (const r of teamTurn(t, s, { switchTo: j })) v += r.p * scoreState(t, r.state, r.outcome, weights).score;
+    if (v > best + 1e-12) { best = v; bestJ = j; }
+  }
+  const out = { switchTo: bestJ };
+  cache?.set(k, out);
+  return out;
 }
 
 // One lever, exactly. Returns { action, complete, score, pKO, pOppLeft, pLose,
@@ -120,7 +149,7 @@ const strip = ({ turnSum, ...rest }) => rest;
 export function solveExact(tctx, s0, { weights, budgetMs = 2000 } = {}) {
   const end = Date.now() + budgetMs;
   const replCache = new Map();
-  const actions = rootActions(s0);
+  const actions = rootActions(s0, tctx);
   return actions.map((a, i) => {
     const slice = (end - Date.now()) / (actions.length - i);
     return solveAction(tctx, s0, a, { weights, deadline: Date.now() + Math.max(0, slice), replCache });

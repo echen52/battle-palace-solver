@@ -16,7 +16,7 @@
 
 import { teamTurn, replace } from "./team.js";
 import { scoreState } from "./score.js";
-import { solveAction, chooseReplacement, rootActions } from "./solve.js";
+import { solveAction, chooseReplacement, rootActions, perishSwitch } from "./solve.js";
 
 // mulberry32: small, seedable, good enough for sampling.
 export function rng(seed) {
@@ -41,13 +41,16 @@ const pick = (items, u) => {
 // With tctx.exactRoll set, each hit's damage roll is DRAWN (rollSample) rather
 // than enumerated -- the same distribution, one branch per hit.
 // firstAction: the lever, when the rollout starts at the root itself (the
-// exact first turn was refused); later turns are always "stay".
+// exact first turn was refused); later turns are "stay" -- except that your
+// mon at perish count 0 switches out (solve.js perishSwitch). A refused root
+// "stay" lever comes in as firstAction "stay" and gets the rule too.
 export function rollout(tctx, s, rand, { weights, replCache = null, turnCap = 400, firstAction = "stay" } = {}) {
   if (tctx.exactRoll) tctx = { ...tctx, exactRoll: false, rollSample: rand };
   // A deferred replacement (solveAction deferReplace): your mon is down, pick its successor first.
   let st = s.yourHpPct <= 0 ? replace(tctx, s, chooseReplacement(tctx, s, weights, replCache)) : s;
   for (let turn = 1; turn <= turnCap; turn++) {
-    const r = pick(teamTurn(tctx, st, turn === 1 ? firstAction : "stay"), rand());
+    const act = turn === 1 && firstAction !== "stay" ? firstAction : (perishSwitch(tctx, st, weights, replCache) ?? "stay");
+    const r = pick(teamTurn(tctx, st, act), rand());
     if (r.outcome === "replace") { st = replace(tctx, r.state, chooseReplacement(tctx, r.state, weights, replCache)); continue; }
     if (r.outcome) return { score: scoreState(tctx, r.state, r.outcome, weights).score, outcome: r.outcome, turns: turn };
     st = r.state;
@@ -118,7 +121,7 @@ export function frontierSampler(root) {
 export function solveMC(tctx, s0, { weights, budgetMs = 10000, seed = 1, round = 20, minRollouts = 100, targetMargin = 0 } = {}) {
   const t0 = Date.now();
   const replCache = new Map();
-  const levers = rootActions(s0).map((a) => {
+  const levers = rootActions(s0, tctx).map((a) => {
     const root = solveAction(rootCtx(tctx), s0, a, { weights, budgetMs: Infinity, maxTurns: 1, replCache, deferReplace: true });
     return { root, tally: newTally(), sample: root.complete ? null : frontierSampler(root), first: firstActionOf(root) };
   });

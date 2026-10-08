@@ -234,7 +234,7 @@ export function buildFight(form) {
   }
   const gn = genderNote(team, form.active, opp);
   if (gn) notes.push(gn);
-  const actions = rootActions(s);
+  const actions = rootActions(s, tbase);
   const labels = actions.map((a) => (a === "stay" ? `Stay in (${team[form.active].species})` : `Switch to ${team[a.switchTo].species}`));
   return { tctx: { team, opp, oppReserves, nextInSpec }, start: mix, actions, labels, notes };
 }

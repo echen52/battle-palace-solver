@@ -270,6 +270,19 @@ function oppLeavesOnPerish(tctx, s, ctx) {
   return true;
 }
 
+// Can YOUR mon switch out by choice? The player's B_ACTION_SWITCH check
+// (src/battle_main.c:4240-4256): not while wrapped, under Mean Look / Block /
+// Spider Web (ESCAPE_PREVENTION) or rooted by Ingrain; not against Shadow Tag,
+// Arena Trap (unless Flying or Levitate) or Magnet Pull (if Steel).
+export function youCanSwitch(tctx, s) {
+  if (s.youWrapped || L.vf(s, "youCantEscape") || s.youIngrained) return false;
+  const a = tctx.opp.ability, me = tctx.team[s.youActive];
+  if (a === "Shadow Tag") return false;
+  if (a === "Arena Trap" && !me.types.includes("Flying") && me.ability !== "Levitate") return false;
+  if (a === "Magnet Pull" && me.types.includes("Steel")) return false;
+  return true;
+}
+
 // ── one turn ───────────────────────────────────────────────────────────────
 // action: "stay", or { switchTo: j }. Returns [{ p, state, outcome, label }]:
 //   outcome  null       the battle goes on (choose again next turn)

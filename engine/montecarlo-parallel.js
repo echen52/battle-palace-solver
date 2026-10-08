@@ -26,7 +26,7 @@ export async function solveMCParallel(tctx, s0, {
   pool.forEach((h) => h.w.on("error", (e) => h.w.emit("message", { type: "error", error: e.message })));
   try {
     const r = await runSolve({
-      pool, actions: rootActions(start[0].state), budgetMs, seed, batch, minRollouts, onProgress, signal,
+      pool, actions: rootActions(start[0].state, tctx), budgetMs, seed, batch, minRollouts, onProgress, signal,
       init: { team: tctx.team, opp: tctx.opp, oppReserves: tctx.oppReserves ?? 2, exactRoll: !!tctx.exactRoll, nextInSpec: tctx.nextIn?.spec ?? null,
         nextInWarm: tctx.nextIn?.exportCache?.() ?? null, weights, start },
     });
