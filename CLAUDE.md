@@ -424,6 +424,23 @@ won (load variance): 138, 204, Snorlax team 120. 3-0 discordant (p 0.25).
 Quirk seen in 74: once every lever scores 1.000 (a sure win) the pick
 can switch back and forth -- harmless (Intimidate on each Salamence entry).
 
+CB TESTING CLOSED (user, 2026-10-08, after the last-mon push 76df3d1).
+QUESTION 2 CHANGED (user, 2026-10-08): Perish Song instead of Destiny Bond
+("timing Perish Song is easier"). Not started -- brainstorm with the user
+first. Facts gathered: Perish Song is DEFENSE in the Palace (palace-groups),
+Mean Look / Block / Spider Web SUPPORT. The opponent AI switches out when
+its perish timer is 0 (ShouldSwitchIfPerishSong, battle_ai_switch_items.c:
+20-34; engine/should-switch.js:73, team.js oppLeavesOnPerish) unless trapped
+(ShouldSwitch :439-453: wrapped / escape prevention, Shadow Tag, Arena Trap,
+Magnet Pull) or out of teammates -> on its LAST mon Perish Song is a sure KO
+in 3 turns if your side outlasts it. Emerald-legal learners (sim/legal.mjs):
+level-up Lapras, Politoed, Misdreavus, Jynx, Altaria, Absol (Celebi: banned
+from the Frontier); egg Gengar, Dewgong, Wigglytuff, Marowak, Azumarill,
+Murkrow. Perish + Mean Look on one mon: Misdreavus, Jynx (level-up), Gengar,
+Murkrow (egg + level-up). Modelling risk: rollouts assume stay after the
+first turn, so a perished mon of yours dies in them (no timed switch-out at
+count 1) -- open note (c); a scripted rollout rule may be needed.
+
 ## Side finding
 
 The live Palace Predictor (echen52.github.io/battle-palace-predictor) runs the
