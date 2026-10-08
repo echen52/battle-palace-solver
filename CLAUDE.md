@@ -460,6 +460,15 @@ in traces). team.js youCanSwitch (battle_main.c:4240-4256) -- rootActions
 test-perish 18; mutations 9/9. Note: on the opponent's last mon with both at
 count 0, staying ALSO wins (it falls the same turn; you have mons left).
 First run: 20 battles, seed 1 (battles 50-69), results/solver-perish/.
+ENGINE BUG FOUND there (ea75074 + tests): OHKO moves (Sheer Cold, Fissure,
+Horn Drill, Guillotine) went THROUGH a Substitute -- logic.js's EFFECT_OHKO
+branch set HP 0 and never looked at the sub. Decomp: Cmd_tryKO only sets
+the damage, then HitFromAtkAnimation's datahpupdate puts it into the sub
+(battle_script_commands.c:1865-1892). Battle 51 (Triathlete Finn's Dewgong)
+was lost to three Sheer Colds, two through subs. Inherited from the Arena
+engine (battle_arena_sim has it too -- not touched). The first 7 battles
+(pre-fix, 6-1) are kept in results/solver-perish/pre-ohko-fix/; the 20 were
+rerun on the fixed engine.
 
 ## Side finding
 
