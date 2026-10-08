@@ -385,6 +385,18 @@ Snorlax 2-3 (pooled 7-10, n.s.). Held switches ~150-210 a team; tied
 send-ins re-solved 19-34, rule-decided 13-23 a team (mostly a and b).
 Snorlax team ~34 turns a battle (vs 13-20): ~22 battles/h on 12 workers.
 Loss logs (with trainer names): results/solver-cb2/loss-logs/.
+THIRD BLOCK (user, 2026-10-08; results/solver-cb3, gitignored): variants of
+Salamence + Suicune + Snorlax, 100 battles (150 more later: raise N in
+watch.sh), seed 1 = battles 50-149 of solver-cb2. Blissey (Leftovers; Bold,
+Ice Beam / Thunderbolt / CM / Rest) for Snorlax: 97/100 (95 Psychic Karlee
+lose, 120 Black Belt Raul lose, 74 turn cap); original team 99/100 on the
+same battles (2-0 discordant, p 0.5). Calm Mind Latios (Lum) for Salamence,
+Suicune on Chesto (two Lums not enterable): STOPPED by the user at 30
+(28-2: 52, 66). TURN-CAP FINDING (battle 74): Blissey +6/+6 and Umbreon
++6 evasion both out of PP, Struggle forever; the solver scored stay 0.79 vs
+switch to a full-HP CB Salamence (Aerial Ace never misses) 0.55 every turn
+-- the score cannot see a battle that never ends. Not changed (user to
+decide). Loss logs: results/solver-cb3/loss-logs/.
 
 ## Side finding
 
