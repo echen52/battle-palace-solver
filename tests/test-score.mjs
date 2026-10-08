@@ -108,6 +108,14 @@ const sc = (s, o = null, w) => S.scoreState(tctx, s, o, w).score;
   ok(near(sc(start, null, mw), 1), "monWeights: an untouched team is still 1.0");
   ok(near(sc({ ...start, yourHpPct: 60 }, null, mw), (5 - 0.8) / 5), "monWeights [2,1,1]: Metagross's lost 40% counts double");
   ok(throws(() => sc(start, null, { monWeights: [1, 1] }), /monWeights has 2/), "a wrong-length monWeights throws");
+  // The opponent's last mon (oppReserves 0): a win ends the battle and the
+  // party is healed after it (scripts.inc:276-281) -- every win scores 1.
+  const last = { ...tctx, oppReserves: 0 }, one = { ...tctx, oppReserves: 1 };
+  const worn = { ...bench(2, { hpPct: 0 }), yourHpPct: 10, youStatus: "burn" };
+  ok(S.scoreState(last, worn, "win").score === 1 && S.scoreState(last, start, "win").score === 1, "last mon: a worn win and an untouched win both score 1");
+  ok(near(S.scoreState(one, worn, "win").score, sc(worn, "win")) && near(sc(worn, "win"), (0.25 + 0.1 - 0.15 - W.lowHp + 1.25) / D), "a mon still behind it: the HP-keeping score (worn win = 0.373)");
+  ok(near(S.scoreState(last, worn, "win", { lastMonWin: false }).score, sc(worn, "win")), "lastMonWin false: the old score on the last mon");
+  ok(S.scoreState(last, worn, "lose").score === 0 && near(S.scoreState(last, worn).score, sc(worn)), "last mon: lose is 0 and an unfinished position keeps its HP score");
   // The breakdown names what it scored.
   const b = S.scoreState(tctx, { ...start, yourHpPct: 50, oppSpikesLayers: 1 }, "win");
   ok(b.mons[0].active && b.mons[0].parts.lowHp === -W.lowHp && b.field.spikes === 0.05 && b.mons[1].value === 1.25, "the breakdown has the per-mon parts and field");

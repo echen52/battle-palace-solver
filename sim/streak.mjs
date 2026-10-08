@@ -40,6 +40,9 @@ const BUDGET = Number(args.budget ?? 3000), WORKERS = Number(args.workers ?? Mat
 const TURN_CAP = 400;
 // --stay-bias off: the old rule (highest average score, ties included)
 const STAY_BIAS = args["stay-bias"] !== "off";
+// --last-mon off: the old score on the opponent's last mon too (engine/score.js
+// lastMonWin: there a win scores 1 -- the party is healed after the battle)
+const WEIGHTS = args["last-mon"] === "off" ? { lastMonWin: false } : undefined;
 // after a faint: "tiebreak" (default; sim/policy.mjs) or "best" (the old
 // highest-score rule); --repl-extra ms: the re-solve's extra time (2000)
 const REPL_POLICY = args.repl ?? "tiebreak", REPL_EXTRA = Number(args["repl-extra"] ?? 2000);
@@ -99,7 +102,7 @@ async function solve(B, s, spec, seed, { budget = BUDGET, fresh = false } = {}) 
   const actions = rootActions(s);
   const r = await runSolve({
     pool, actions, budgetMs: budget, seed,
-    init: { team: B.team, opp: B.oppTeam[s.oppActive], oppReserves: Bt.aliveOpp(s).length, exactRoll: true,
+    init: { team: B.team, opp: B.oppTeam[s.oppActive], oppReserves: Bt.aliveOpp(s).length, exactRoll: true, weights: WEIGHTS,
       nextInSpec: ni?.spec ?? null, nextInWarm: ni?.warm ?? null, start: [{ p: 1, state: s }] },
   });
   solves++; solveMs += Date.now() - t0; exactMsSum += r.exactMs ?? 0; stopped[r.stoppedBy] = (stopped[r.stoppedBy] ?? 0) + 1;

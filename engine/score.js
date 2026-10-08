@@ -27,6 +27,17 @@
 // The sum is divided by sum(monWeights) * (alive + hp): an untouched team
 // scores 1.0, boosts and field bonuses can push it above. "lose" scores 0.
 // "oppLeft" is scored like the position (no KO bonus) -- neutral, as agreed.
+//
+// The opponent's LAST mon (tctx.oppReserves 0; user, 2026-10-08): its KO ends
+// the battle, and the game heals your party and restores held items after
+// every Palace battle (data/maps/BattleFrontier_BattlePalaceBattleRoom/
+// scripts.inc:276-281, HealPlayerParty + frontier_restorehelditems after
+// DoSpecialTrainerBattle) -- so every win scores 1 and the solver maximizes
+// P(win), not the HP left (battle 120: sacking Blissey to bring Salamence back
+// out of its Choice lock won 89% vs staying 40%, but scored lower). With
+// teammates still behind it, the HP-keeping score above stands (the user:
+// more HP left is better against the unknown mons in the back).
+// weights.lastMonWin false: the old scoring on the last mon too.
 
 import { lowHpCheck } from "./palace.js";
 
@@ -43,6 +54,7 @@ export const DEFAULT_WEIGHTS = Object.freeze({
   spikes: 0.05,
   screen: 0.01,
   koBonus: 0,
+  lastMonWin: true, // a win on the opponent's last mon scores 1 (see above)
   monWeights: null, // null = 1 per team member
 });
 
@@ -79,6 +91,7 @@ export function scoreState(tctx, s, outcome = null, weights = DEFAULT_WEIGHTS) {
   if (mw.length !== team.length) throw new Error(`score: monWeights has ${mw.length} entries for ${team.length} mons`);
   const denom = mw.reduce((a, b) => a + b, 0) * (w.alive + w.hp);
   if (outcome === "lose") return { score: 0, outcome, mons: [], field: {} };
+  if (outcome === "win" && w.lastMonWin && (tctx.oppReserves ?? 2) === 0) return { score: 1, outcome, mons: [], field: {}, lastMon: true };
 
   const mons = team.map((mon, i) => {
     if (i === s.youActive) {

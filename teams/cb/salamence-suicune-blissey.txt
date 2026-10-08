@@ -1,0 +1,31 @@
+Salamence @ Choice Band
+Ability: Intimidate
+Level: 50
+EVs: 252 Atk / 4 SpD / 252 Spe
+Sassy Nature
+- Aerial Ace
+- Earthquake
+- Rock Slide
+- Brick Break
+
+Suicune @ Lum Berry
+Ability: Pressure
+Level: 50
+EVs: 252 HP / 204 Def / 52 Spe
+Modest Nature
+IVs: 0 Atk
+- Surf
+- Rest
+- Calm Mind
+- Toxic
+
+Blissey @ Leftovers
+Ability: Natural Cure
+Level: 50
+EVs: 252 Def / 172 SpA / 84 Spe
+Bold Nature
+IVs: 0 Atk
+- Ice Beam
+- Thunderbolt
+- Calm Mind
+- Rest
