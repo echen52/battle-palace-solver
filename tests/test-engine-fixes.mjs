@@ -68,5 +68,30 @@ const pOf = (res, f) => res.filter((r) => f(r.state)).reduce((a, r) => a + r.p, 
   ok(pKO3 > 0 && near(pOf(res3, (x) => x.yourHpPct <= 0 && x.oppHpPct <= 0), pKO3), "a loaf keeps the bond up");
 }
 
+// ── A Substitute takes an OHKO move ─────────────────────────────────────────
+// Cmd_tryKO sets the damage (target HP, HP - 1 if enduring); BattleScript_
+// EffectOHKO -> HitFromAtkAnimation's datahpupdate puts it into the sub
+// (data/battle_scripts_1.s:762-771, 253-260; src/battle_script_commands.c:
+// 1865-1892). Found in the Perish team's streak battle 51: Sheer Cold went
+// through Blissey's and Suicune's subs.
+{
+  const opp = mk("Dewgong", "Docile", ["Sheer Cold"], "Thick Fat");
+  const you = mk("Suicune", "Modest", ["Splash"], "Pressure", { hp: 252 });
+  const ctx = { you, opp, noLabels: true };
+  const s0 = L.buildStartState({ you, opp });
+  const subFull = { ...s0, youSubstituteHP: Math.floor(you.stats.hp / 4) };
+  const r = L.resolveTurn(ctx, subFull, "Splash", "Sheer Cold");
+  const pHit = pOf(r, (x) => x.youSubstituteHP == null);
+  ok(pHit > 0.25 && pHit < 0.35, `Sheer Cold into a full sub: breaks it on a hit (${pHit.toFixed(3)}; 30% accuracy)`);
+  ok(r.every((x) => x.state.yourHpPct === 100), "...and Suicune keeps every HP point");
+  // a sub with more HP than the mon has left: dented by the mon's HP, not broken
+  const lowMon = { ...s0, yourHpPct: (40 / you.stats.hp) * 100, youSubstituteHP: 51 };
+  const r2 = L.resolveTurn(ctx, lowMon, "Splash", "Sheer Cold");
+  ok(near(pOf(r2, (x) => x.youSubstituteHP === 11), pHit) && r2.every((x) => x.state.yourHpPct > 0 && Math.abs(x.state.yourHpPct - (40 / you.stats.hp) * 100) < 1e-9),
+    "sub 51 on a 40-HP mon: Sheer Cold takes 40 off the sub, the mon untouched");
+  // no sub: the KO as before
+  ok(near(pOf(L.resolveTurn(ctx, s0, "Splash", "Sheer Cold"), (x) => x.yourHpPct <= 0), pHit), "no sub: Sheer Cold still KOs on a hit");
+}
+
 console.log(`${fail ? "FAIL" : "ok"}  engine fixes: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);

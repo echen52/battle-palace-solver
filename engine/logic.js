@@ -8289,6 +8289,21 @@ function applyMoveCore(ctx, s, actor, moveName, hit, selfHit, secondaryTriggered
     }
     const foeEndureKey = isYou ? "oppEndureActive" : "youEndureActive";
     const foeDestinyBondKey = isYou ? "oppDestinyBondActive" : "youDestinyBondActive";
+    const foeSubKey = isYou ? "oppSubstituteHP" : "youSubstituteHP";
+    if (s[foeSubKey] != null) {
+      // PALACE FORK: a Substitute takes the OHKO. Cmd_tryKO only sets
+      // gBattleMoveDamage (the target's HP, HP - 1 when it endures) and never
+      // sets HITMARKER_IGNORE_SUBSTITUTE; BattleScript_EffectOHKO then goes to
+      // BattleScript_HitFromAtkAnimation (data/battle_scripts_1.s:762-771,
+      // 253-260), whose datahpupdate routes the damage into the sub
+      // (src/battle_script_commands.c:1865-1892): the sub loses that much or
+      // breaks, the mon is untouched, nobody fainted (no Destiny Bond).
+      const foeRawHp = Math.round((s[foeHpKey] / 100) * foeMon.stats.hp);
+      const dmg = s[foeEndureKey] ? Math.max(0, foeRawHp - 1) : foeRawHp;
+      s[foeSubKey] -= Math.min(s[foeSubKey], dmg);
+      if (s[foeSubKey] <= 0) s[foeSubKey] = null;
+      return;
+    }
     if (s[foeEndureKey]) {
       // Cmd_tryKO's own explicit gProtectStructs[target].endured check
       // (src/battle_script_commands.c:7546-7550) clamps to 1 HP instead of a
