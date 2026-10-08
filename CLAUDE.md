@@ -492,7 +492,17 @@ may shuffle switches.
 PHASE F WRAP-UP (user, 2026-10-08): question 3 (DD / SD vs Curse / CM)
 DROPPED -- "from testing CB teams ... bulky teams are ideal". Perish Song
 (question 2, ex-Destiny Bond) judged a poor strategy after 11 battles.
-Question 1 (crippler) not started. "That's all we have for now."
+Question 1 (crippler) SCRATCHED by the user.
+LEECH SEED (user, 2026-10-08; judged unviable, no sim run): Impish Venusaur
+(252 HP / 252 SpD / 4 Spe; Curse / Leech Seed / Rest / Sludge Bomb). Impish
+69/6/25 healthy, 28/55/17 low. Inside Support the AI's scores decide:
+AI_CV_Curse (battle_ai_scripts.s:1870-1892) +1 x3 at 50% while Def <= +3/+1/0,
+-10 at +6 Atk; AI_CBM_LeechSeed (:410-416) -10 seeded / Grass; AI_TryToFaint
+(:2615-2627) runs on status moves too: +2 at 176/256 when the move's type is
+4x (Grass Leech Seed vs Swampert / Quagsire / Golem). Per turn, fresh vs a
+non-4x target: Curse 23.4%, Leech Seed 1.6% (~60 turns to seed); even at
+Curse +4; Leech Seed only at +6. The logic.js comment calling
+targetLeechSeeded "hardcoded false" is stale (it is read at :4585).
 
 ## Side finding
 
