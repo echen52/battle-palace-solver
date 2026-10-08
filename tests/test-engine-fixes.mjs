@@ -89,6 +89,10 @@ const pOf = (res, f) => res.filter((r) => f(r.state)).reduce((a, r) => a + r.p, 
   const r2 = L.resolveTurn(ctx, lowMon, "Splash", "Sheer Cold");
   ok(near(pOf(r2, (x) => x.youSubstituteHP === 11), pHit) && r2.every((x) => x.state.yourHpPct > 0 && Math.abs(x.state.yourHpPct - (40 / you.stats.hp) * 100) < 1e-9),
     "sub 51 on a 40-HP mon: Sheer Cold takes 40 off the sub, the mon untouched");
+  // enduring behind a sub: tryKO's damage is HP - 1 (:7546-7550), so a
+  // 40-HP sub on a 40-HP mon keeps 1 HP
+  const endure = { ...s0, yourHpPct: (40 / you.stats.hp) * 100, youSubstituteHP: 40, youEndureActive: true };
+  ok(near(pOf(L.resolveTurn(ctx, endure, "Splash", "Sheer Cold"), (x) => x.youSubstituteHP === 1), pHit), "Endure behind a sub: Sheer Cold takes HP - 1 = 39, the sub keeps 1");
   // no sub: the KO as before
   ok(near(pOf(L.resolveTurn(ctx, s0, "Splash", "Sheer Cold"), (x) => x.yourHpPct <= 0), pHit), "no sub: Sheer Cold still KOs on a hit");
 }
