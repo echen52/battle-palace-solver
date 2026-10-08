@@ -489,6 +489,10 @@ as a 1% tie-break on the last mon; a noise floor in chooseLever) and a PP /
 Struggle-distance check: user DECLINED -- "a very minor fix and i'm liking
 the engine the way it is". Known limitation: at near-certain wins the sim
 may shuffle switches.
+PHASE F WRAP-UP (user, 2026-10-08): question 3 (DD / SD vs Curse / CM)
+DROPPED -- "from testing CB teams ... bulky teams are ideal". Perish Song
+(question 2, ex-Destiny Bond) judged a poor strategy after 11 battles.
+Question 1 (crippler) not started. "That's all we have for now."
 
 ## Side finding
 
