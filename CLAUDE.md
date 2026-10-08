@@ -414,7 +414,15 @@ too (opponent "3rd" -> oppReserves 0). test-last-mon: solveMC on the
 fixture gives Blissey 0.880 / stay 0.406 (played out 89 / 40); old score
 stay 0.182 / Blissey 0.087. Mutations 6/7 (the 7th, oppLeft counted as a
 win, is unreachable: no reserves -> the opponent cannot leave).
-Loss replay with / without it: results/lastmon-replay/ (run.sh).
+Loss replay with / without it (results/lastmon-replay/; run.sh stopped for
+low memory after 4 teams, run2.sh did the last 2 with 3 workers): all 25
+non-wins of solver-cb2 + solver-cb3, fix and --last-mon off side by side.
+Fix only: 157 (Salamence + Latios + Suicune), Blissey team 74 (the turn-cap
+stalemate: won in 45 turns) and 120 (turn 12 switch to Blissey 0.973 vs
+stay 0.700; Salamence back unlocked, won turn 14). Old only: none. Both
+won (load variance): 138, 204, Snorlax team 120. 3-0 discordant (p 0.25).
+Quirk seen in 74: once every lever scores 1.000 (a sure win) the pick
+can switch back and forth -- harmless (Intimidate on each Salamence entry).
 
 ## Side finding
 
