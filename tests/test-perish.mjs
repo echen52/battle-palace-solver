@@ -46,6 +46,7 @@ ok(JSON.stringify(X.rootActions(s0, withAb("Shadow Tag"))) === '["stay"]' && X.r
 // perishSwitch
 ok(X.perishSwitch(tctx, s0) === null, "no Perish Song: null");
 ok(X.perishSwitch(tctx, sung(s0, 1, 1)) === null, "count 1: not yet");
+ok(X.perishSwitch(tctx, { ...s0, youPerishCount: 0 }) === null, "a count of 0 without the Perish Song flag: null");
 const ps = X.perishSwitch(tctx, sung(s0, 0, 0));
 ok(ps && (ps.switchTo === 1 || ps.switchTo === 2), `count 0: switch out (${JSON.stringify(ps)})`);
 ok(X.perishSwitch(withAb("Shadow Tag"), sung(s0, 0, 0)) === null, "count 0 but trapped: null");
@@ -76,6 +77,12 @@ const sv = MC.solveMC(tS, sS, { budgetMs: 4000, seed: 2 });
 const acts = X.rootActions(sS, tS), iStay = acts.indexOf("stay"), st = sv.levers[iStay];
 ok(sv.levers.every((l, i) => i === iStay || l.score - l.margin > st.score + st.margin),
   `solve at count 0: every switch clearly above stay (${sv.levers.map((l) => `${l.score.toFixed(3)}±${l.margin.toFixed(3)}`).join(", ")})`);
+
+// rollouts from that position switch Gengar out: their mean is the switches'
+// level, not stay's (a rollout that stayed would sit near stay's 0.589)
+let sum = 0; const rr = MC.rng(9);
+for (let i = 0; i < 400; i++) sum += MC.rollout(tS, sS, rr, { firstAction: "stay" }).score;
+ok(sum / 400 > 0.7, `rollouts at count 0 switch out: mean ${(sum / 400).toFixed(3)} (stay lever ${st.score.toFixed(3)})`);
 
 console.log(`test-perish: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
