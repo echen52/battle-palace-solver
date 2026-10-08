@@ -397,6 +397,24 @@ Suicune on Chesto (two Lums not enterable): STOPPED by the user at 30
 switch to a full-HP CB Salamence (Aerial Ace never misses) 0.55 every turn
 -- the score cannot see a battle that never ends. Not changed (user to
 decide). Loss logs: results/solver-cb3/loss-logs/.
+LAST-MON SCORE (user, 2026-10-08; 42db68c): battle 120 (Blissey team) lost
+with Salamence locked into Earthquake vs Heracross, its last mon. Played out
+(4,000 games a line, scratch sack.mjs): turn 12 stay 70% / switch to Blissey
+and leave it in 97% / Blissey then straight back 96%; turn 13 50 / 90 / 71;
+turn 14 40 / 89 / 61. The solver's Blissey lever already plays the sack line
+(rollouts stay, Salamence comes back unlocked after Blissey falls) -- the
+SCORE hid it: a win was worth the HP left (worn win ~0.1, lose 0), so 40% x
+0.47 beat 89% x 0.11. The party is healed and items restored after every
+Palace battle (BattleFrontier_BattlePalaceBattleRoom/scripts.inc:276-281),
+so engine/score.js now scores every win on the opponent's LAST mon
+(oppReserves 0) as 1 = P(win); with teammates behind it the HP-keeping score
+stands (user: more HP is better against the unknown mons in the back).
+weights.lastMonWin false / streak --last-mon off = old. The page gets it
+too (opponent "3rd" -> oppReserves 0). test-last-mon: solveMC on the
+fixture gives Blissey 0.880 / stay 0.406 (played out 89 / 40); old score
+stay 0.182 / Blissey 0.087. Mutations 6/7 (the 7th, oppLeft counted as a
+win, is unreachable: no reserves -> the opponent cannot leave).
+Loss replay with / without it: results/lastmon-replay/ (run.sh).
 
 ## Side finding
 
