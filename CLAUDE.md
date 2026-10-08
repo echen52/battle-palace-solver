@@ -440,6 +440,26 @@ Murkrow. Perish + Mean Look on one mon: Misdreavus, Jynx (level-up), Gengar,
 Murkrow (egg + level-up). Modelling risk: rollouts assume stay after the
 first turn, so a perished mon of yours dies in them (no timed switch-out at
 count 1) -- open note (c); a scripted rollout rule may be needed.
+PERISH TEAM (user, 2026-10-08): teams/perish/Gengar-Blissey(BrightPowder)-
+Suicune(Lefties).txt -- Gengar Modest Lum (Ice Punch / Giga Drain / Perish
+Song / Sub; lead), Blissey Modest BrightPowder (Seismic Toss / Sub / T-Wave /
+Rest), Suicune Modest Leftovers 252 HP / 252 Def (Surf / Sub / Toxic / Rest).
+User's plan: Toxic stall + switch, Perish Song the win condition. Engine
+facts shown to the user: Gengar (Modest) sings 25% healthy, 48% with a Sub
+up, 59% low; after singing 3% (the AI's -10 on a sung target; Sub instead);
+10% loaf (no Support move: the fallback); Toxic / T-Wave are each their
+set's only Support move, so 50% of Suicune's / Blissey's turns use them
+even on an already statused foe. Timing: sung on turn T -> faints at the
+end of T+3 (battle_script_commands.c:8521-8523, battle_util.c:1843-1856);
+engine count 0 = the game's "count fell to 1" = the AI's flee trigger.
+BUILT (18ab267 + tests): solve.js perishSwitch -- your mon at count 0
+switches out (best one-turn lookahead) in the rollouts; sim/streak.mjs
+forces the best-scoring switch at the root ("perish count 0 -> must switch"
+in traces). team.js youCanSwitch (battle_main.c:4240-4256) -- rootActions
+(s, tctx) offers stay only while trapped (was: switches always offered).
+test-perish 18; mutations 9/9. Note: on the opponent's last mon with both at
+count 0, staying ALSO wins (it falls the same turn; you have mons left).
+First run: 20 battles, seed 1 (battles 50-69), results/solver-perish/.
 
 ## Side finding
 
