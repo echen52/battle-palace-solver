@@ -476,6 +476,19 @@ switch 1x. Gengar left alone kept rolling Perish Song (Defense) and lost
 (56, 60). OPEN: battle 56's replacement scored 1.000+-0.000 (Blissey vs a
 Struggling Aerodactyl 74/176) yet lost -- possible rollout vs battle
 mismatch, not investigated. Loss log: results/solver-perish/loss-logs/.
+RESOLVED (user review of battle 56, 2026-10-08): not a mismatch. From turn
+82 every lever scored ~1.000 (their last mon, CB Aerodactyl locked into
+Earthquake; Gengar immune by Levitate -> every rollout wins) -- so the
+pick among them was arbitrary: chooseLever's "clearly better" uses the 95%
+margins, which are 0 at certainty, so a switch at 1.000 beats stay at
+0.9996 (checked). Three free-hit switches (Blissey, Suicune, Gengar ->
+Blissey) followed; Earthquake PP ran out, Struggle (typecalc skipped for
+MOVE_STRUGGLE, battle_script_commands.c:1355-1364, so it hits Ghosts) KO'd
+Gengar as its recoil KO'd Aerodactyl -> both out = loss. Proposed fixes (HP
+as a 1% tie-break on the last mon; a noise floor in chooseLever) and a PP /
+Struggle-distance check: user DECLINED -- "a very minor fix and i'm liking
+the engine the way it is". Known limitation: at near-certain wins the sim
+may shuffle switches.
 
 ## Side finding
 
