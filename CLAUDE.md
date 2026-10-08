@@ -469,6 +469,13 @@ was lost to three Sheer Colds, two through subs. Inherited from the Arena
 engine (battle_arena_sim has it too -- not touched). The first 7 battles
 (pre-fix, 6-1) are kept in results/solver-perish/pre-ohko-fix/; the 20 were
 rerun on the fixed engine.
+RERUN STOPPED by the user after 11 (8-3: 51 Triathlete Finn, 56 Pkmn
+Ranger Shania, 60 Triathlete Mason) -- "enough evidence for a poor
+strategy". Perish sung 22x, opponent fled on its count 13x, our count-0
+switch 1x. Gengar left alone kept rolling Perish Song (Defense) and lost
+(56, 60). OPEN: battle 56's replacement scored 1.000+-0.000 (Blissey vs a
+Struggling Aerodactyl 74/176) yet lost -- possible rollout vs battle
+mismatch, not investigated. Loss log: results/solver-perish/loss-logs/.
 
 ## Side finding
 
