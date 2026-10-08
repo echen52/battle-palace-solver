@@ -373,6 +373,18 @@ gTrainerClassNames, title case ("225 Cooltrainer Miriam", "Palace Maven
 Spenser (Gold)"); streak.mjs trace header + record field trainerName;
 compare.mjs loss list. test-trainer-name 9; mutations 4/5 caught (the 5th,
 first-vs-last mapping, is equivalent: each facility class maps once).
+SECOND BLOCK, NEW RULES (user, 2026-10-07 -> 08 01:00; results/solver-cb2,
+gitignored; watch.sh; paused once for heat, resumed -- streak.mjs skips done
+battles). 250 each, seed 1, budget 2 s, traced. Aerodactyl team swapped for
+Salamence + Latios + Suicune. Wins: Salamence + Suicune + Snorlax 248
+(losses 120 Black Belt Raul, 274 Pkmn Breeder Oscar); Metagross + Latios +
+Swampert 245; Metagross + Latios + Suicune 244; Salamence + Latios + Suicune
+243. Paired vs Snorlax team: 6-2 (p 0.29), 5-2 (p 0.45), 7-2 (p 0.18).
+Old vs new rules, same team, paired: Metagross+Suicune 2-2, Swampert 3-5,
+Snorlax 2-3 (pooled 7-10, n.s.). Held switches ~150-210 a team; tied
+send-ins re-solved 19-34, rule-decided 13-23 a team (mostly a and b).
+Snorlax team ~34 turns a battle (vs 13-20): ~22 battles/h on 12 workers.
+Loss logs (with trainer names): results/solver-cb2/loss-logs/.
 
 ## Side finding
 
