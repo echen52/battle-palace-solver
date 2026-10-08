@@ -503,6 +503,21 @@ AI_CV_Curse (battle_ai_scripts.s:1870-1892) +1 x3 at 50% while Def <= +3/+1/0,
 non-4x target: Curse 23.4%, Leech Seed 1.6% (~60 turns to seed); even at
 Curse +4; Leech Seed only at +6. The logic.js comment calling
 targetLeechSeeded "hardcoded false" is stale (it is read at :4585).
+SUB / BATON PASS / REST (user, 2026-10-08; judged unviable, no sim run):
+example Umbreon Bold (Sub / BP / Rest / Faint Attack); 32 species can learn
+all three legally. All three are DEFENSE; Palace = a Frontier battle, so the
+AI runs CheckBadMove + CheckViability + TryToFaint (battle_ai_script_
+commands.c:371-372). On a Defense roll: Sub 100% at 75-100% HP; with a Sub
+up -> Baton Pass 100% (Sub -8, BP -2, Rest -8/-3); Rest below ~40% (55% vs a
+faster foe, AI_CV_Rest :1396-1425). FLAW the user spotted: at 45-65% HP, no
+Sub and no boosts, BP fires 19-32% -- AI_CV_Substitute's (:1547-1558) up to
+three -1 rolls (156/256 each) drag Sub to BP's flat -2 (:1998-2014), ties
+50/50 -> a bare pass. Receiver = the player's pick (only move choice is
+Palace-special in battle_controller_player.c:2629-2640; BP opens the party
+screen, battle_scripts_1.s:1702), but the newcomer eats the hit when
+Umbreon is faster. No Support move -> Support rolls fall back to 50% loaf /
+50% a uniform Sub/BP/Rest with no AI (battle_gfx_sfx_util.c:162-221).
+Engine: YOUR Baton Pass still throws (not ported).
 
 ## Side finding
 
