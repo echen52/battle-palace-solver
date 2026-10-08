@@ -367,6 +367,12 @@ newcomer's Intimidate added on top of the entered opp stages via
 form.entering) + decideSendIn (each solved with budget/n, tied re-solved,
 then firstTurnStatsTeam vs the mon in front -> tieBreak). test-ui-logic 67,
 test-site-browser 31; 7/7 mutations caught.
+TRAINER NAMES ON LOGS (user, 2026-10-07; 72dc4a5): sim/trainer-name.mjs --
+facility class -> gFacilityClassToTrainerClass (trainer_class_lookups.h) ->
+gTrainerClassNames, title case ("225 Cooltrainer Miriam", "Palace Maven
+Spenser (Gold)"); streak.mjs trace header + record field trainerName;
+compare.mjs loss list. test-trainer-name 9; mutations 4/5 caught (the 5th,
+first-vs-last mapping, is equivalent: each facility class maps once).
 
 ## Side finding
 
