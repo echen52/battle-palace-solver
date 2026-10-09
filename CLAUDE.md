@@ -518,6 +518,26 @@ screen, battle_scripts_1.s:1702), but the newcomer eats the hit when
 Umbreon is faster. No Support move -> Support rolls fall back to 50% loaf /
 50% a uniform Sub/BP/Rest with no AI (battle_gfx_sfx_util.c:162-221).
 Engine: YOUR Baton Pass still throws (not ported).
+STALL / MEDICHAM RUNS (user, 2026-10-08/09; results/solver-stall,
+solver-medicham, gitignored; seed 1). Skarmory/Dusclops/Blissey Toxic-Curse-
+Sub-Rest, all Bold (low-HP Palace row is sticky until switch/faint:
+battle_script_commands.c:4660/6390, cleared battle_main.c:3240/3335): stopped
+at 10, 8-2 (52 Expert Nadia, 53 Bird Keeper Harold; traces checked).
+Suicune CM (Chesto) / Dusclops Bold / Blissey CM Modest: 17/20 (57, 60, 67)
+-- not extended. Medicham CB Sassy / Latios Sub Hasty (Lum) / Suicune CM
+(Lefties): 48/50 on battles 50-99 (62 Expert Weston, 77 Kindler Ferris) vs
+the four solver-cb2 teams 48-50/50 there -- n.s. Battle 62 turn 1 (switch
+out vs Gardevoir): Sassy Medicham Spe 118 < Gardevoir 121; stay = 12.3%
+Destiny Bond, 12.3% Endure, 3.7% crit Psychic KO first.
+OPEN LEVEL (user, 2026-10-09; 389ab3d): streak.mjs --level open. Opponents
+at max(60, your highest level) (GetFrontierEnemyMonLevel battle_tower.c:
+3247-3265; Spenser too), high-tier sets 850-881 drawable (:1696 is level-50
+only) in draw.mjs and next-in.js (teammateDist { open }, buildReplacement
+level, makeNextIn spec.level). SAME trainers (GetRandomScaledFrontierTrainerId
+has no level mode). Seed 1, battles 50-99: 7 of 50 parties differ from level
+50 (a high-tier set drawn); the rest are identical (but at the new level).
+Tests in test-sim-draw / test-next-in; 6/6 mutations caught; spec.level
+reaching the solver checked by a DUMP_LOW replay of battle 57.
 
 ## Side finding
 
