@@ -10,6 +10,10 @@
 // for a two-ability species). Spenser Gold at battle 63, 84, ... (both
 // symbols held: GetFrontierBrainStatus, src/frontier_util.c:1656-1691).
 // Battle n's draw depends only on (seed, n).
+// { open: true }: Open Level -- the high-tier rejection (:1696) applies only at
+// level 50, so sets 850-881 (Dragonite, Tyranitar, the birds' and beasts'
+// 5-6) can be drawn. The trainer draw is the same in both modes
+// (GetRandomScaledFrontierTrainerId :1102-1129 takes no level mode).
 
 import { rng } from "../engine/montecarlo.js";
 import * as N from "../engine/next-in.js";
@@ -22,7 +26,7 @@ export const challengeOf = (n) => Math.ceil(n / 7);
 export const stageOf = (n) => ((n - 1) % 7) + 1;
 export const isSpenser = (n) => n > 42 && (n - 42) % 21 === 0;
 
-export function makeDraw(seed) {
+export function makeDraw(seed, { open = false } = {}) {
   const trainerCache = new Map();
   function challengeTrainers(c) {
     if (c < 8) throw new Error(`draw: challenge ${c} is not the late pool`);
@@ -51,7 +55,7 @@ export function makeDraw(seed) {
     const ids = [];
     while (ids.length < 3) {
       const m = set[Math.floor(rand() * set.length)];
-      if (m > HIGH_TIER) continue;
+      if (!open && m > HIGH_TIER) continue;
       const e = N.poolEntry(m);
       if (ids.some((c) => N.poolEntry(c).species === e.species)) continue;
       if (e.item != null && ids.some((c) => N.poolEntry(c).item === e.item)) continue;

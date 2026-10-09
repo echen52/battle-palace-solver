@@ -107,8 +107,10 @@ export function trainerPrior({ challenge, battle, trainerId } = {}) {
 }
 
 // FillTrainerParty's rejection rules: may `id` join the party `chosen`?
-function canJoin(id, chosen) {
-  if (id > HIGH_TIER) return false;
+// open: Open Level -- high-tier sets are allowed (the check at
+// src/battle_tower.c:1696 applies only at level 50).
+function canJoin(id, chosen, open = false) {
+  if (!open && id > HIGH_TIER) return false;
   const e = POOL_BY_ID[id];
   for (const c of chosen) {
     const o = POOL_BY_ID[c];
@@ -121,17 +123,18 @@ function canJoin(id, chosen) {
 
 // [{ p, ivs, slots: [slot1Id, slot2Id] }] given the lead's frontier mon id,
 // summing to 1 (pairs from different trainers at the same IVs merged). Throws when no trainer in the prior can lead with it.
-export function teammateDist(prior, leadId) {
+// open: Open Level (high-tier sets 850-881 can be drawn).
+export function teammateDist(prior, leadId, { open = false } = {}) {
   const raw = [];
   for (const { id: tid, p: pt } of prior) {
     const set = FRONTIER_TRAINERS[tid].monSet;
-    const lv50 = set.filter((m) => m <= HIGH_TIER);
-    const leadCount = lv50.filter((m) => m === leadId).length;
+    const drawable = open ? set : set.filter((m) => m <= HIGH_TIER);
+    const leadCount = drawable.filter((m) => m === leadId).length;
     if (leadCount === 0) continue;
-    const pLead = leadCount / lv50.length;
-    const first = set.filter((m) => canJoin(m, [leadId]));
+    const pLead = leadCount / drawable.length;
+    const first = set.filter((m) => canJoin(m, [leadId], open));
     for (const a of first) {
-      const second = set.filter((m) => canJoin(m, [leadId, a]));
+      const second = set.filter((m) => canJoin(m, [leadId, a], open));
       for (const b of second) raw.push({ p: pt * pLead * (1 / first.length) * (1 / second.length), trainerId: tid, slots: [a, b] });
     }
   }
@@ -304,13 +307,15 @@ export function replacementDist(dist, you, fainted) {
 // get each ability half the time (CreateMonWithEVSpreadNatureOTID rolls the
 // personality; the ability bit is personality & 1).
 const builtCache = new Map();
-export function buildReplacement(id, ivs) {
-  const k = `${id}|${ivs}`;
+// level: the opponent's level (GetFrontierEnemyMonLevel, src/battle_tower.c:
+// 3247-3265 -- 50, or at Open Level your party's highest level, at least 60).
+export function buildReplacement(id, ivs, level = 50) {
+  const k = `${id}|${ivs}|${level}`;
   if (builtCache.has(k)) return builtCache.get(k);
   const e = POOL_BY_ID[id];
   const iv = { hp: ivs, atk: ivs, def: ivs, spa: ivs, spd: ivs, spe: ivs };
   const mons = e.abilities.map((ability) => ({ p: 1 / e.abilities.length,
-    mon: L.buildMon({ species: e.species, level: 50, nature: e.nature, evs: e.evs, ivs: iv, ability, item: e.item, moves: e.moves,
+    mon: L.buildMon({ species: e.species, level, nature: e.nature, evs: e.evs, ivs: iv, ability, item: e.item, moves: e.moves,
       friendship: 255 }) }));
   builtCache.set(k, mons);
   return mons;
@@ -384,7 +389,11 @@ export function shareOf(table, curHp) {
 // brain: "Spenser Silver" / "Spenser Gold" -- his team is known, so the
 // teammates are his slots 1 and 2 with certainty (lead must be his slot 0);
 // challenge / battle / trainerId are not used.
-export function makeNextIn({ lead, second = null, challenge, battle, trainerId, brain = null } = {}, warm = null) {
+// level: the opponents' level -- 50, or Open Level's (60+; high-tier sets
+// drawable). Left out of the spec at 50 so level-50 specs are unchanged.
+export function makeNextIn({ lead, second = null, challenge, battle, trainerId, brain = null, level = 50 } = {}, warm = null) {
+  if (!(Number.isInteger(level) && (level === 50 || (level >= 60 && level <= 100)))) throw new Error(`next-in: level must be 50 or 60-100 (got ${level})`);
+  const open = level !== 50;
   const e = FRONTIER_POOL[lead];
   if (!e) throw new Error(`next-in: no frontier set named "${lead}"`);
   const e2 = second != null ? FRONTIER_POOL[second] : null;
@@ -399,7 +408,7 @@ export function makeNextIn({ lead, second = null, challenge, battle, trainerId, 
     dist = [{ p: 1, slots: [idOf(team[1]), idOf(team[2])], ivs: FRONTIER_POOL[team[0]].fixedIV }];
   } else {
     if (e.brain) throw new Error(`next-in: ${lead} is a Frontier Brain set -- pass brain`);
-    dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index);
+    dist = warm?.dist ?? teammateDist(trainerPrior({ challenge, battle, trainerId }), e.index, { open });
   }
   let thirdDist = null;
   if (e2) {
@@ -430,7 +439,7 @@ export function makeNextIn({ lead, second = null, challenge, battle, trainerId, 
       s.youReflectTurns != null, s.youLightScreenTurns != null, s.weatherType, s.youStatus, !!s.youForesighted].join("|");
     let tables = tableCache.get(k);
     if (!tables) {
-      tables = reps.map((r) => ({ p: r.p, forms: buildReplacement(r.id, r.ivs).map((f) => ({ p: f.p, table: hitTable(f.mon, eff.you, s) })) }));
+      tables = reps.map((r) => ({ p: r.p, forms: buildReplacement(r.id, r.ivs, level).map((f) => ({ p: f.p, table: hitTable(f.mon, eff.you, s) })) }));
       tableCache.set(k, tables);
     }
     const curHp = Math.round((s.yourHpPct / 100) * eff.you.stats.hp);
@@ -439,5 +448,5 @@ export function makeNextIn({ lead, second = null, challenge, battle, trainerId, 
     return share;
   }
   const exportCache = () => ({ dist, repl: [...replCache], tables: [...tableCache] });
-  return { spec: { lead, second, challenge, battle, trainerId, brain }, lead, leadId: idOf(lead), dist, replacements, expectedHitShare, exportCache };
+  return { spec: { lead, second, challenge, battle, trainerId, brain, ...(open ? { level } : {}) }, lead, leadId: idOf(lead), dist, replacements, expectedHitShare, exportCache };
 }

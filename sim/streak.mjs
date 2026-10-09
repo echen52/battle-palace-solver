@@ -51,11 +51,22 @@ const REPL_POLICY = args.repl ?? "tiebreak", REPL_EXTRA = Number(args["repl-extr
 // happened) as text.
 const ONLY = args.only == null ? null : args.only === "spenser" ? "spenser" : new Set(args.only.split(",").map(Number));
 const TRACE = args.trace ?? null;
+// --level 50 (default) / open: Open Level. The opponents' level is your
+// party's highest, at least 60 (GetFrontierEnemyMonLevel, src/battle_tower.c:
+// 3247-3265 -- Spenser's too, via SetFacilityPtrsGetLevel), and high-tier sets
+// can be drawn (:1696). Same trainers either way.
+const LEVEL_MODE = args.level ?? "50";
+if (LEVEL_MODE !== "50" && LEVEL_MODE !== "open") throw new Error(`--level must be 50 or open (got ${LEVEL_MODE})`);
+const OPEN = LEVEL_MODE === "open";
 const trace = (line) => { if (TRACE) fs.appendFileSync(TRACE, line + "\n"); };
 if (!TEAM_FILE || !OUT) throw new Error("usage: --team <file> --out <jsonl> [--battles N --seed S --budget ms --from i --workers w]");
 
 const team = buildTeam(fs.readFileSync(TEAM_FILE, "utf8"));
-const draw = makeDraw(SEED);
+const TOP_LEVEL = Math.max(...team.map((m) => m.level));
+if (!OPEN && TOP_LEVEL > 50) throw new Error(`level 50 mode, but the team has a level ${TOP_LEVEL} mon -- use --level open`);
+const OPP_LEVEL = OPEN ? Math.max(60, TOP_LEVEL) : 50;
+if (OPEN) console.log(`Open Level: opponents at level ${OPP_LEVEL}, high-tier sets drawable`);
+const draw = makeDraw(SEED, { open: OPEN });
 // Genders, once per battle (sim/gender.mjs): the opponent's from its
 // personality (its ability bit fixes the low byte's parity); yours as the team
 // file states them -- "(M)" / "(F)" -- or else drawn once per battle too. The
@@ -64,7 +75,7 @@ const NO_GENDER = team.filter((m) => m.genderDist.length > 1).map((m) => m.speci
 if (NO_GENDER.length) console.log(`gender not stated for ${NO_GENDER.join(", ")} -- drawn once per battle`);
 function buildBattle(d, rand) {
   const oppTeam = d.keys.map((k, i) => {
-    const mon = L.buildFrontierOpponent(getOpponentConfig(k, { ability: d.abilities[i], ivTier: d.iv, allowUnreachableTier: true }));
+    const mon = L.buildFrontierOpponent(getOpponentConfig(k, { level: OPP_LEVEL, ability: d.abilities[i], ivTier: d.iv, allowUnreachableTier: true }));
     const abs = N.poolEntry(N.setId(k)).abilities;
     return withGender(mon, genderOf(SEED, d.n, "opp", i, mon.species, abs.length > 1 ? abs.indexOf(d.abilities[i]) : null));
   });
@@ -123,8 +134,9 @@ async function solve(B, s, spec, seed, { budget = BUDGET, fresh = false } = {}) 
 function specFor(d, n, s, seen) {
   if (Bt.aliveOpp(s).length === 0) return null;
   const cur = d.keys[s.oppActive], first = d.keys[seen[0]];
-  if (d.trainer === "Spenser Gold") return { lead: first, ...(cur !== first ? { second: cur } : {}), brain: "Spenser Gold" };
-  const at = { challenge: Math.min(8, challengeOf(n)), battle: stageOf(n) };
+  const lv = OPEN ? { level: OPP_LEVEL } : {};
+  if (d.trainer === "Spenser Gold") return { lead: first, ...(cur !== first ? { second: cur } : {}), brain: "Spenser Gold", ...lv };
+  const at = { challenge: Math.min(8, challengeOf(n)), battle: stageOf(n), ...lv };
   return cur === first ? { lead: cur, ...at } : { lead: first, second: cur, ...at };
 }
 
@@ -243,7 +255,7 @@ async function playBattle(i) {
     }
   }
   trace(`result: ${result ?? "turnCap"}`);
-  return { i, n, trainer: d.trainer, trainerName: trainerName(d.trainer), keys: d.keys, abilities: d.abilities, iv: d.iv, result: result ?? "turnCap", turns: turn,
+  return { i, n, trainer: d.trainer, trainerName: trainerName(d.trainer), keys: d.keys, abilities: d.abilities, iv: d.iv, ...(OPEN ? { level: OPP_LEVEL } : {}), result: result ?? "turnCap", turns: turn,
     decisions, switches, youLeft: result === "win" ? 1 + T.aliveBench(s).length : 0, ms: Date.now() - t0 };
 }
 

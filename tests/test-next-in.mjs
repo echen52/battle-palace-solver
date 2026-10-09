@@ -253,5 +253,31 @@ const team = SD.buildTeam(fs.readFileSync(path.join(here, "../teams/user-test-te
     `his Lapras as the replacement: IV 16, both abilities half each, stats as built directly (HP ${direct.stats.hp})`);
 }
 
+// Open Level: high-tier teammates and leads, and the replacement built at
+// the opponents' level (GetFrontierEnemyMonLevel, src/battle_tower.c:3247).
+{
+  const prior = N.trainerPrior({ challenge: 8, battle: 1 });
+  const lead = P["Salamence 5"].index;
+  const d50 = N.teammateDist(prior, lead), dOpen = N.teammateDist(prior, lead, { open: true });
+  const sum = (d) => d.reduce((a, x) => a + x.p, 0);
+  const hiP = (d) => d.filter((x) => x.slots.some((m) => m > 849)).reduce((a, x) => a + x.p, 0);
+  ok(Math.abs(sum(d50) - 1) < 1e-9 && Math.abs(sum(dOpen) - 1) < 1e-9 && hiP(d50) === 0 && hiP(dOpen) > 0.05,
+    `Salamence 5 lead: level 50 never pairs it with a high-tier set; Open Level does (${(100 * hiP(dOpen)).toFixed(1)}% of pairs)`);
+  let threw = false; try { N.teammateDist(prior, P["Tyranitar 5"].index); } catch { threw = true; }
+  ok(threw && Math.abs(sum(N.teammateDist(prior, P["Tyranitar 5"].index, { open: true })) - 1) < 1e-9, "Tyranitar 5 can lead only at Open Level");
+  const ni50 = N.makeNextIn({ lead: "Salamence 5", challenge: 8, battle: 1 }), ni100 = N.makeNextIn({ lead: "Salamence 5", challenge: 8, battle: 1, level: 100 });
+  ok(!("level" in ni50.spec) && ni100.spec.level === 100, "spec: level left out at 50 (unchanged), carried at Open Level");
+  ok(JSON.stringify(N.makeNextIn(ni100.spec, ni100.exportCache()).dist) === JSON.stringify(ni100.dist), "Open Level spec + warm cache rebuild the same teammate odds (as the workers do)");
+  let bad = 0; for (const lv of [49, 51, 59, 101, 70.5]) { try { N.makeNextIn({ lead: "Salamence 5", challenge: 8, battle: 1, level: lv }); } catch { bad++; } }
+  ok(bad === 5, "level must be 50 or 60-100");
+  const dn = P["Dragonite 5"];
+  const b100 = N.buildReplacement(dn.index, 31, 100), direct = L.buildMon(getOpponentConfig("Dragonite 5", { level: 100, ivTier: 31, ability: dn.abilities[0] }));
+  ok(b100[0].mon.level === 100 && JSON.stringify(b100[0].mon.stats) === JSON.stringify(direct.stats) && N.buildReplacement(dn.index, 31)[0].mon.level === 50,
+    `Dragonite 5 as a level-100 replacement: stats as built directly (HP ${direct.stats.hp}); the default is still level 50`);
+  const you = { types: ["Water"], ability: "Pressure" }, opp = { types: ["Fire"] };
+  const r100 = ni100.replacements(you, opp), r50 = ni50.replacements(you, opp);
+  ok(r100.some((r) => r.id > 849) && !r50.some((r) => r.id > 849), "Open Level replacements include high-tier sets; level 50 never");
+}
+
 console.log(`test-next-in: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);

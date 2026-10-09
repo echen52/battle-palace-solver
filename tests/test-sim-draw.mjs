@@ -74,5 +74,46 @@ ok(JSON.stringify(again.drawBattle(77)) === JSON.stringify(draw.drawBattle(77)) 
   ok(total >= 3000 && worst < 4.5, `trainer ${tid}'s leads: each level-50 entry of its list equally likely (${total} battles, worst z ${worst.toFixed(2)})`);
 }
 
+// Open Level (makeDraw(seed, { open: true })): the high-tier rejection
+// (src/battle_tower.c:1696) is off, nothing else changes.
+{
+  const d50 = D.makeDraw(1), dOpen = D.makeDraw(1, { open: true });
+  let sameTrainers = true, rulesOk = true, hiSeen = 0, hiAt50 = 0, hiFromList = true, sameWhenNoHi = true, noHiTrainers = 0;
+  for (let n = 50; n < 50 + 3000; n++) {
+    const a = d50.drawBattle(n), b = dOpen.drawBattle(n);
+    if (a.trainer !== b.trainer) sameTrainers = false;
+    if (a.trainer === "Spenser Gold") continue;
+    const ids = b.keys.map(N.setId), es = ids.map(N.poolEntry);
+    if (new Set(es.map((e) => e.species)).size !== 3 || new Set(ids).size !== 3) rulesOk = false;
+    const items = es.map((e) => e.item).filter((x) => x != null);
+    if (new Set(items).size !== items.length) rulesOk = false;
+    const list = FRONTIER_TRAINERS[b.trainer].monSet;
+    if (ids.some((m) => !list.includes(m))) hiFromList = false;
+    hiSeen += ids.filter((m) => m > 849).length;
+    hiAt50 += a.keys.map(N.setId).filter((m) => m > 849).length;
+    if (!list.some((m) => m > 849)) { noHiTrainers++; if (JSON.stringify(a) !== JSON.stringify(b)) sameWhenNoHi = false; }
+  }
+  ok(sameTrainers, "Open Level: the same trainers as level 50 for the same (seed, n)");
+  ok(rulesOk && hiFromList, "Open Level parties: 3 species, no repeated item or set, every set from the trainer's own list");
+  ok(hiSeen > 0 && hiAt50 === 0, `high-tier sets (850+) drawn at Open Level (${hiSeen} in 3000 battles), never at level 50`);
+  ok(noHiTrainers > 1000 && sameWhenNoHi, `a trainer with no high-tier sets draws the identical party in both modes (${noHiTrainers} battles)`);
+}
+// Open Level lead odds: uniform over the WHOLE list (high-tier entries too).
+{
+  const tid = 263, set = FRONTIER_TRAINERS[tid].monSet;
+  const freq = new Map(); let total = 0;
+  const d3 = D.makeDraw(9, { open: true });
+  for (let n = 50; total < 3000 && n < 50 + 400000; n++) {
+    if (D.isSpenser(n)) continue;
+    if (d3.challengeTrainers(D.challengeOf(n))[D.stageOf(n) - 1] !== tid) continue;
+    const lead = N.setId(d3.drawBattle(n).keys[0]);
+    freq.set(lead, (freq.get(lead) ?? 0) + 1); total++;
+  }
+  const pOf = (m) => set.filter((x) => x === m).length / set.length;
+  const hiShare = [...freq].filter(([m]) => m > 849).reduce((a, [, c]) => a + c, 0) / total, hiExp = set.filter((m) => m > 849).length / set.length;
+  const worst = Math.max(...[...new Set(set)].map((m) => Math.abs((freq.get(m) ?? 0) / total - pOf(m)) / Math.sqrt(pOf(m) * (1 - pOf(m)) / total)));
+  ok(total >= 3000 && worst < 4.5, `Open Level, trainer ${tid}'s leads: every entry equally likely, high-tier ones included (high-tier ${(100 * hiShare).toFixed(1)}% vs ${(100 * hiExp).toFixed(1)}% expected, worst z ${worst.toFixed(2)})`);
+}
+
 console.log(`test-sim-draw: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
