@@ -18,6 +18,16 @@ import { chooseLever, tiedWithBest, tieBreak, trade, firstTurnStatsTeam } from "
 export const STAGE_KEYS = ["atk", "def", "spa", "spd", "spe", "accuracy", "evasion"];
 const HIGH_TIER = 849;
 
+// ── the level mode ─────────────────────────────────────────────────────────
+// The page's Level 50 / Level 100 buttons. Level 100 = Open Level with a
+// level-100 team: every mon on both sides at 100 (GetFrontierEnemyMonLevel,
+// src/battle_tower.c:3247-3265, gives the opponents your highest level) and
+// the high-tier sets 850-881 drawable (the :1696 rejection is level-50 only).
+// The trainers are the same in both modes. Your pasted Level lines are
+// overridden by the button.
+export const LEVELS = [50, 100];
+const isOpen = (level) => level !== 50;
+
 // ── your team ──────────────────────────────────────────────────────────────
 // Showdown text -> buildPlayerMon configs (engine/showdown.js), max 3.
 export function parseTeam(text) {
@@ -40,21 +50,22 @@ export function brainFor({ challenge, battle } = {}) {
 }
 
 // ── the opponent's set list ────────────────────────────────────────────────
-// Level-50 sets (the solver is a level-50 solver), optionally only those a
-// trainer drawn for this challenge and battle can lead with. brain: his three,
-// in party order.
-export function setChoices({ challenge, battle, bracketOnly = true, brain = null } = {}) {
+// The sets for the level mode (level 50: no high-tier sets), optionally only
+// those a trainer drawn for this challenge and battle can lead with. brain:
+// his three, in party order.
+export function setChoices({ challenge, battle, bracketOnly = true, brain = null, level = 50 } = {}) {
   if (brain) return [...BRAIN_TEAMS[brain]];
+  const open = isOpen(level);
   let ids = null;
   if (bracketOnly && challenge && battle) {
     ids = new Set();
-    for (const { id } of trainerPrior({ challenge, battle })) for (const m of FRONTIER_TRAINERS[id].monSet) if (m <= HIGH_TIER) ids.add(m);
+    for (const { id } of trainerPrior({ challenge, battle })) for (const m of FRONTIER_TRAINERS[id].monSet) if (open || m <= HIGH_TIER) ids.add(m);
   }
   // Integer index only: the pool also carries the 46 Frontier Brain sets and a
   // duplicate "Mr. Mime 1-4" (index null, from the retired list) beside the
   // indexed "MR_MIME 1-4".
   return Object.entries(FRONTIER_POOL)
-    .filter(([, e]) => Number.isInteger(e.index) && e.index <= HIGH_TIER && !e.brain && (!ids || ids.has(e.index)))
+    .filter(([, e]) => Number.isInteger(e.index) && (open || e.index <= HIGH_TIER) && !e.brain && (!ids || ids.has(e.index)))
     .map(([key]) => key)
     .sort((a, b) => setLabel(a).localeCompare(setLabel(b), undefined, { numeric: true }));
 }
@@ -64,13 +75,13 @@ export const setLabel = (key) => key.replace(/^MR_MIME /, "Mr. Mime ");
 // The trainer IV bands a lead can come with in this bracket, most likely
 // first: each trainer weighted by the chance it is drawn and leads with this
 // set (next-in.js teammateDist's own weighting).
-export function ivTierOdds(setKey, { challenge, battle } = {}) {
+export function ivTierOdds(setKey, { challenge, battle, level = 50 } = {}) {
   const e = FRONTIER_POOL[setKey];
   if (e?.brain) return [{ iv: e.fixedIV, p: 1 }]; // a Brain's IVs are fixed
   if (!e || !challenge || !battle) return [];
   const by = new Map();
   for (const { id, p } of trainerPrior({ challenge, battle })) {
-    const lv = FRONTIER_TRAINERS[id].monSet.filter((m) => m <= HIGH_TIER);
+    const lv = FRONTIER_TRAINERS[id].monSet.filter((m) => isOpen(level) || m <= HIGH_TIER);
     const n = lv.filter((m) => m === e.index).length;
     if (!n) continue;
     const iv = fixedIvs(id);
@@ -83,12 +94,13 @@ export function ivTierOdds(setKey, { challenge, battle } = {}) {
 // gender: "male" / "female" as the game shows it, or null (unknown -- the
 // engine then splits each Attract by the species' odds). Ignored for a
 // species with one gender.
-export function buildOpponent({ setKey, ability, ivTier, gender = null }) {
+export function buildOpponent({ setKey, ability, ivTier, gender = null, level = 50 }) {
   const e = FRONTIER_POOL[setKey];
   if (!e) throw new Error(`no Frontier set named "${setKey}"`);
   const ab = ability || (e.abilities.length === 1 ? e.abilities[0] : null);
   if (!ab) throw new Error(`${setKey} can have ${e.abilities.join(" or ")} -- pick one`);
-  const mon = L.buildFrontierOpponent(getOpponentConfig(setKey, { ability: ab, ivTier, allowUnreachableTier: true }));
+  if (!isOpen(level) && Number.isInteger(e.index) && e.index > HIGH_TIER) throw new Error(`${setLabel(setKey)} only appears at Level 100 (Open Level)`);
+  const mon = L.buildFrontierOpponent(getOpponentConfig(setKey, { level, ability: ab, ivTier, allowUnreachableTier: true }));
   return gender && mon.genderDist.length > 1 ? { ...mon, genderDist: [{ p: 1, gender }] } : mon;
 }
 // A built mon's gender for display: "male" / "female" / "genderless", or null
@@ -124,14 +136,17 @@ export function sleepCounters({ rest = false, slept = 0 } = {}, mon) {
 //   you: { stages, confused (0 = no, else the engine's next-check index 1..5), subPct, lowHp (true/false/null = auto) },
 //   opp: { setKey, ability, ivTier, hpPct, status, toxicTurns, sleep, itemGone, stages, confused, firstTurn, lowHp },
 //   field: { weather, weatherTurns (null = permanent), you: { reflect, lightScreen, spikes }, opp: { ... } },
-//   run: { challenge, battle, oppIndex (1-3), leadKey (when oppIndex is 2), brain (null or a BRAINS name) },
+//   run: { challenge, battle, oppIndex (1-3), leadKey (when oppIndex is 2), brain (null or a BRAINS name), level (50 / 100) },
 // }
 // Returns { tctx (plain data + nextIn spec), start: [{ p, state }], actions, labels, notes }.
 const SCREEN_TURNS = 5;
 const MAX_SLEEP_VARIANTS = 64;
 export function buildFight(form) {
   const notes = [];
-  const team = form.team.map((cfg) => buildPlayerMon(cfg));
+  const level = form.run?.level ?? 50;
+  if (!LEVELS.includes(level)) throw new Error(`level must be 50 or 100 (got ${level})`);
+  if (form.team.some((cfg) => cfg.level !== level)) notes.push(`Solved at level ${level} (the button above), whatever Level the paste gives.`);
+  const team = form.team.map((cfg) => buildPlayerMon({ ...cfg, level }));
   const brain = form.run?.brain ?? null;
   if (brain) {
     const bt = BRAIN_TEAMS[brain], who = brain.split(" ")[0], i = bt.indexOf(form.opp.setKey), idx = form.run.oppIndex ?? 1;
@@ -139,7 +154,7 @@ export function buildFight(form) {
     if (idx === 1 && i !== 0) throw new Error(`${who} always sends out ${FRONTIER_POOL[bt[0]].species} first`);
     if (idx > 1 && i === 0) throw new Error(`${FRONTIER_POOL[bt[0]].species} is ${who}'s first Pokémon, not his ${idx === 2 ? "2nd" : "3rd"}`);
   } else if (FRONTIER_POOL[form.opp.setKey]?.brain) throw new Error(`${form.opp.setKey} is a Frontier Brain set: pick the Brain battle`);
-  const opp = buildOpponent(form.opp);
+  const opp = buildOpponent({ ...form.opp, level });
   const oppReserves = Math.max(0, 3 - (form.run?.oppIndex ?? 1));
   const tbase = { team, opp, oppReserves };
   let s = teamStart(tbase, form.active);
@@ -214,15 +229,16 @@ export function buildFight(form) {
   // The opponent's replacement after a KO (next-in.js)
   let nextInSpec = null;
   const run = form.run ?? {};
+  const lv = isOpen(level) ? { level } : {};
   if (run.oppIndex === 3) notes.push("Their last Pokémon: a KO ends the battle (no replacement to face).");
   else if (brain) {
-    const spec = { lead: BRAIN_TEAMS[brain][0], second: run.oppIndex === 2 ? form.opp.setKey : null, brain };
+    const spec = { lead: BRAIN_TEAMS[brain][0], second: run.oppIndex === 2 ? form.opp.setKey : null, brain, ...lv };
     makeNextIn(spec);
     nextInSpec = spec;
   } else if (run.challenge && run.battle) {
     const spec = run.oppIndex === 2
-      ? { lead: run.leadKey, second: form.opp.setKey, challenge: run.challenge, battle: run.battle }
-      : { lead: form.opp.setKey, challenge: run.challenge, battle: run.battle };
+      ? { lead: run.leadKey, second: form.opp.setKey, challenge: run.challenge, battle: run.battle, ...lv }
+      : { lead: form.opp.setKey, challenge: run.challenge, battle: run.battle, ...lv };
     try {
       if (run.oppIndex === 2 && !run.leadKey) throw new Error("enter their first Pokémon to estimate the last one");
       makeNextIn(spec); // validates; the workers rebuild it from the spec

@@ -27,7 +27,7 @@
 [hidden] { display: none !important; } /* rows are display:flex; hidden must still hide */
 body { font-family: monospace; font-size: 15px; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-.app-header { padding: 18px 20px 0; } /* plain: same background as the page, no band or rule */
+.app-header { padding: 18px 20px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; } /* plain: same background as the page, no band or rule; the Level buttons sit top right */
 .app-header h1 { font-size: 22px; }
 
 /* full width, as on the Arena page: the side panels share the room, the

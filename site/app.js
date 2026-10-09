@@ -105,13 +105,14 @@ function readMons() {
 }
 
 // ── the opponent ───────────────────────────────────────────────────────────
+const levelNow = () => Number(document.querySelector('input[name="level"]:checked').value);
 function runInputs() {
   return { challenge: Number($("challenge").value), battle: Number($("battle").value),
-    oppIndex: Number(document.querySelector('input[name="oppIndex"]:checked').value), brain: $("brain").value || null };
+    oppIndex: Number(document.querySelector('input[name="oppIndex"]:checked').value), brain: $("brain").value || null, level: levelNow() };
 }
 function refreshSetList() {
-  const { challenge, battle, brain } = runInputs();
-  const keys = setChoices({ challenge, battle, bracketOnly: $("bracketOnly").checked, brain });
+  const { challenge, battle, brain, level } = runInputs();
+  const keys = setChoices({ challenge, battle, bracketOnly: $("bracketOnly").checked, brain, level });
   $("bracketRow").hidden = !!brain;
   labelToKey.clear();
   setLabels = keys.map((k) => { labelToKey.set(setLabel(k), k); return setLabel(k); });
@@ -181,7 +182,7 @@ function renderOppSet() {
   const key = keyOf($("oppSet").value);
   const e = key ? FRONTIER_POOL[key] : null;
   $("oppCard").hidden = !e; $("oppAbilityRow").hidden = !e || e.abilities.length < 2; $("oppIvRow").hidden = !e;
-  $("oppGenderRow").hidden = !e || !!genderOf(buildOpponent({ setKey: key, ability: e.abilities[0], ivTier: 31 }));
+  $("oppGenderRow").hidden = !e || !!genderOf(buildOpponent({ setKey: key, ability: e.abilities[0], ivTier: 31, level: 100 })); // gender does not depend on the level; 100 builds every set
   if (!e) return;
   $("oppCard").innerHTML = `<div class="sc-title">${setLabel(key)}</div>
     <div class="sc-meta"><b>${e.item ?? "no item"}</b> · <b>${e.nature}</b> · ${e.abilities.join(" / ")}</div>
@@ -224,14 +225,14 @@ let fight = null;
 function refresh() {
   $("solveError").textContent = "";
   if (teamCfgs) teamCfgs.forEach((c, i) => {
-    const mon = buildPlayerMon(c);
+    const mon = buildPlayerMon({ ...c, level: levelNow() });
     const hp = Math.max(0, Math.min(100, Number($(`m${i}-hp`).value) || 0));
     $(`m${i}-hpAbs`).textContent = `${Math.round((hp / 100) * mon.stats.hp)}/${mon.stats.hp}`;
   });
   try {
     const key = keyOf($("oppSet").value);
     if (key) {
-      const o = buildOpponent({ setKey: key, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31, gender: $("oppGender").value || null });
+      const o = buildOpponent({ setKey: key, ability: $("oppAbility").value || null, ivTier: Number($("oppIv").value) || 31, gender: $("oppGender").value || null, level: levelNow() });
       $("oppHpAbs").textContent = `${Math.round(((Number($("oppHp").value) || 100) / 100) * o.stats.hp)}/${o.stats.hp}`;
     }
     if ($("youFainted").checked) {
@@ -373,8 +374,8 @@ function init() {
     if (e.target.id === "oppSet" && e.type === "change") $("oppGender").value = ""; // a new mon
     if (["challenge", "battle"].includes(e.target.id) && e.type === "change") $("brain").value = brainFor(runInputs()) ?? "";
     if (["challenge", "battle", "brain"].includes(e.target.id) || e.target.name === "oppIndex") brainChanged();
-    else if (e.target.id === "bracketOnly") refreshSetList();
-    if (["oppSet", "challenge", "battle"].includes(e.target.id)) renderOppSet();
+    else if (e.target.id === "bracketOnly" || e.target.name === "level") refreshSetList();
+    if (["oppSet", "challenge", "battle"].includes(e.target.id) || e.target.name === "level") renderOppSet();
     clearTimeout(refresh.t); refresh.t = setTimeout(refresh, 120);
   });
   $("solveBtn").addEventListener("click", solve);

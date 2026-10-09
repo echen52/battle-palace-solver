@@ -47,6 +47,10 @@ try {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(`${base}/site/index.html`);
   ok(errors.length === 0, `loads with no error (${errors.join("; ")})`);
+  // The Level buttons: top right of the header, Level 50 on by default.
+  const segBox = await page.locator(".level-seg").boundingBox(), vw = page.viewportSize().width;
+  ok(await page.isChecked("#level50") && !(await page.isChecked("#level100")) && segBox && vw - (segBox.x + segBox.width) < 40 && segBox.y < 60,
+    `Level 50 / Level 100 buttons top right (right gap ${segBox ? Math.round(vw - segBox.x - segBox.width) : "?"} px, top ${segBox ? Math.round(segBox.y) : "?"} px), Level 50 on`);
 
   // Your team, the opponent, the bracket.
   await page.fill("#teamText", TEAM);
@@ -168,6 +172,34 @@ try {
     && sVerdict.includes(sRows.find((r) => r.startsWith("★")).replace("★ Send in ", "").split(" ")[0]), `two rows, one starred, the verdict names it ("${sVerdict}"; ${sRows.join(" | ")})`);
   ok(errors.length === 0, `send-in ran with no error (${errors.join("; ")})`);
   await page.uncheck("#youFainted");
+
+  // Level 100: the set list gains the high-tier sets, both sides' numbers are
+  // level 100, the bars and the page's solve (its workers' next-in at 100)
+  // match Node on the same level-100 position; back to 50 refuses Dragonite.
+  await page.click("label[for=level100]"); await page.waitForTimeout(300);
+  await page.selectOption("#challenge", "8"); await page.selectOption("#battle", "1"); await page.waitForTimeout(300);
+  await page.click("#oppSet");
+  const list100 = await page.$$eval("#oppSetList .combo-item", (e) => e.map((x) => x.textContent));
+  ok(list100.length === U.setChoices({ challenge: 8, battle: 1, level: 100 }).length && list100.includes("Dragonite 5"), `Level 100: the list has the high-tier sets (${list100.length}, Dragonite 5 among them)`);
+  await page.keyboard.type("dragonite 5"); await page.keyboard.press("Enter"); await page.waitForTimeout(500);
+  const iv100 = Number(await page.inputValue("#oppIv"));
+  const form100 = { ...form, opp: { ...form.opp, setKey: "Dragonite 5", ability: null, ivTier: iv100 }, run: { challenge: 8, battle: 1, oppIndex: 1, level: 100 } };
+  const fight100 = U.buildFight(form100);
+  ok(await page.textContent("#oppHpAbs") === `${fight100.tctx.opp.stats.hp}/${fight100.tctx.opp.stats.hp}` && await page.textContent("#m0-hpAbs") === `${fight100.tctx.team[0].stats.hp}/${fight100.tctx.team[0].stats.hp}`,
+    `HP shown at level 100 (Dragonite ${fight100.tctx.opp.stats.hp}, your ${fight100.tctx.team[0].species} ${fight100.tctx.team[0].stats.hp})`);
+  const ch100 = U.turnChoices(fight100.tctx, fight100.start);
+  const bars100 = await page.$$eval("#oppChoices .cb-row", (rows) => rows.map((r) => [r.querySelector("span").textContent, r.querySelector(".cb-p").textContent]));
+  ok(bars100.length > 0 && bars100.every(([m, p], i) => m === ch100.opp[i].move && p === U.pct(ch100.opp[i].p)), `Level 100 bars = turnChoices (${bars100.map((b) => b.join(" ")).join(", ")})`);
+  await page.selectOption("#budget", "30000");
+  await page.click("#solveBtn");
+  await page.waitForFunction(() => /playouts · /.test(document.getElementById("progress").textContent) && !document.getElementById("solveBtn").disabled, null, { timeout: 120000 });
+  const rows100 = await page.$$eval("#optionsTable tbody tr", (trs) => trs.map((tr) => [...tr.children].map((td) => td.textContent.trim())));
+  const node100 = U.resultRows((await MP.solveFight({ ...fight100.tctx, nextIn: N.makeNextIn(fight100.tctx.nextInSpec) }, fight100.start, { budgetMs: 30000 })).levers, fight100.labels);
+  ok(rows100.length === 3 && node100.every((nr) => { const pr = rows100.find((r) => r[0].includes(nr.label)); return pr && Math.abs(pageScore(pr) - nr.score) <= pageMargin(pr) + nr.margin + 0.002; }),
+    `Level 100 solve: the page agrees with Node (page ${rows100.map((r) => `${r[0]} ${r[1]}`).join(" | ")}; node ${node100.map((r) => `${r.label} ${r.score.toFixed(3)}±${r.margin.toFixed(3)}`).join(" | ")})`);
+  await page.click("label[for=level50]"); await page.waitForTimeout(400);
+  ok(/only appears at Level 100/.test(await page.textContent("#notes")), "back to Level 50: Dragonite 5 is refused, with the reason");
+  ok(errors.length === 0, `Level 100 ran with no error (${errors.join("; ")})`);
 
   // A saved team survives a reload.
   await page.fill("#teamName", "test team");

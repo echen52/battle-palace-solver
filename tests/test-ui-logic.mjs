@@ -183,5 +183,34 @@ const st = (form) => U.buildFight(form).start[0].state;
   ok(d.j === cands[0].j && d.why === "the only one left", "one candidate: no solve");
 }
 
+// ── the level mode (Level 50 / Level 100 buttons) ──────────────────────────
+{
+  const N = await import(pathToFileURL(path.join(here, "../engine/next-in.js")).href);
+  const L = await import(pathToFileURL(path.join(here, "../engine/logic.js")).href);
+  const has = (keys, k) => keys.includes(k);
+  const s50 = U.setChoices({ challenge: 8, battle: 1 }), s100 = U.setChoices({ challenge: 8, battle: 1, level: 100 });
+  const all50 = U.setChoices({ bracketOnly: false }), all100 = U.setChoices({ bracketOnly: false, level: 100 });
+  ok(!has(s50, "Dragonite 5") && has(s100, "Dragonite 5") && has(s100, "Tyranitar 10") && s100.length > s50.length && s50.every((k) => has(s100, k)),
+    `Level 100 set list adds the high-tier sets (challenge 8+: ${s50.length} -> ${s100.length})`);
+  ok(all100.length - all50.length === 32 && !all50.some((k) => /^(Dragonite|Tyranitar) /.test(k)), `all sets: the 32 high-tier ones only at Level 100 (${all50.length} -> ${all100.length})`);
+  ok(U.ivTierOdds("Dragonite 5", { challenge: 8, battle: 1 }).length === 0 && U.ivTierOdds("Dragonite 5", { challenge: 8, battle: 1, level: 100 }).length > 0,
+    "IV odds for a high-tier lead exist only at Level 100");
+  ok(throws(() => U.buildOpponent({ setKey: "Dragonite 5", ivTier: 31 }), /only appears at Level 100/) && U.buildOpponent({ setKey: "Dragonite 5", ivTier: 31, level: 100 }).level === 100,
+    "a high-tier set is refused at Level 50, built at 100");
+  const f50 = U.buildFight(base({ run: { challenge: 8, battle: 1, oppIndex: 1, level: 50 } })), fDef = U.buildFight(base({ run: { challenge: 8, battle: 1, oppIndex: 1 } }));
+  ok(JSON.stringify(f50.tctx.nextInSpec) === JSON.stringify(fDef.tctx.nextInSpec) && !("level" in f50.tctx.nextInSpec) && f50.tctx.team.every((m) => m.level === 50) && f50.tctx.opp.level === 50,
+    "Level 50: unchanged (team, opponent and next-in spec as before)");
+  const f100 = U.buildFight(base({ run: { challenge: 8, battle: 1, oppIndex: 1, level: 100 } }));
+  const meta100 = T.buildPlayerMon({ ...cfgs[0], level: 100 });
+  ok(f100.tctx.team.every((m) => m.level === 100) && JSON.stringify(f100.tctx.team[0].stats) === JSON.stringify(meta100.stats) && f100.tctx.opp.level === 100
+    && f100.tctx.nextInSpec.level === 100 && f100.notes.some((n) => /level 100/.test(n)),
+    `Level 100: both sides at 100 (your ${meta100.species} HP ${meta100.stats.hp}), next-in spec carries it, a note says the paste's Level is overridden`);
+  const ni = N.makeNextIn(f100.tctx.nextInSpec);
+  ok(ni.replacements({ types: ["Steel", "Psychic"], ability: "Clear Body" }, { types: ["Dragon", "Flying"] }).some((r) => r.id > 849), "its next-in can send in a high-tier set");
+  const fb = U.buildFight(base({ opp: { ...base().opp, setKey: "Spenser Gold Arcanine", ability: "Intimidate", ivTier: null }, run: { challenge: 6, battle: 7, oppIndex: 1, brain: "Spenser Gold", level: 100 } }));
+  ok(fb.tctx.opp.level === 100 && fb.tctx.nextInSpec.level === 100 && fb.tctx.nextInSpec.brain === "Spenser Gold", "Spenser at Level 100: his mons at 100 too");
+  ok(throws(() => U.buildFight(base({ run: { challenge: 8, battle: 1, oppIndex: 1, level: 70 } })), /50 or 100/), "only 50 or 100");
+}
+
 console.log(`test-ui-logic: ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);
